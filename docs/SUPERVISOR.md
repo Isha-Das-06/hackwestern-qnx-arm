@@ -18,6 +18,7 @@
 cd ~/mks_servo
 ./start_robot.sh          # real robot (needs /dev/ser3, ser4 and ser5, see GRIPPER.md)
 ./start_robot.sh --sim    # fake Pico, fake motors, fake vision: rehearse anywhere
+./start_robot.sh --sim --real-vision   # real camera app, fake arm
 ./stop_robot.sh
 ```
 

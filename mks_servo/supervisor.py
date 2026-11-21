@@ -114,7 +114,7 @@ class Proc:
 
 
 class Supervisor:
-    def __init__(self, cfg, sim):
+    def __init__(self, cfg, sim, real_vision=False):
         self.cfg, self.sim = cfg, sim
         self.arm = load_json("arm.json")
         self.grip_cfg = load_json("gripper.json")
@@ -141,7 +141,8 @@ class Supervisor:
                 f.write("0")
         self.procs = {}
         for name, pc in cfg["procs"].items():
-            cmd = [subs.get(a, a) for a in (pc["sim"] if sim else pc["cmd"])]
+            use_sim = sim and not (name == "vision" and real_vision)
+            cmd = [subs.get(a, a) for a in (pc["sim"] if use_sim else pc["cmd"])]
             self.procs[name] = Proc(name, pc, cmd, ports[name])
         self.estop_path = cfg["estop_sim_path"] if sim else cfg["estop_path"]
         if not sim:
@@ -232,8 +233,14 @@ class Supervisor:
             udp_send(self.arm["cmd_port"], {"cmd": "RESUME"})
         self.vision_down = down
         if not v.alive() or v.silent(now, vc["restart_after_silent_s"] * 1000):
-            if now - v.started_t > 1.0:      # don't restart-loop faster than 1 Hz
+            if v.alive():
                 v.kill()
+                v.died_t = now
+            v.died_t = getattr(v, "died_t", None) or now
+            # Wait a moment before restarting: the USB camera needs time to let go,
+            # and it never restart-loops faster than restart_delay_s.
+            if now - v.died_t >= vc.get("restart_delay_s", 2.0) and now - v.started_t > 1.0:
+                v.died_t = None
                 v.restarts += 1
                 self.event(f"restarting vision (#{v.restarts})")
                 v.start()
@@ -329,9 +336,11 @@ def make_web(sup, timer):
 def main():
     ap = argparse.ArgumentParser(description="robot supervisor")
     ap.add_argument("--sim", action="store_true", help="fake Pico, motors and vision")
+    ap.add_argument("--real-vision", action="store_true",
+                    help="with --sim: use the real camera app (rehearse before the arm is built)")
     args = ap.parse_args()
     cfg = load_json("supervisor.json")
-    sup = Supervisor(cfg, args.sim)
+    sup = Supervisor(cfg, args.sim, args.real_vision)
     for name in ("gripper", "motion", "vision"):
         sup.procs[name].start()
         sup.event(f"started {name}: {' '.join(sup.procs[name].cmd)}")

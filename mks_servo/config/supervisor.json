@@ -8,9 +8,10 @@
     "motion":  {"cmd": ["on", "-p", "30", "python3", "motion.py"],
                 "sim":  ["on", "-p", "30", "python3", "motion.py", "--sim", "4"],
                 "restart": false, "heartbeat_ms": 500},
-    "vision":  {"cmd": ["sh", "/data/home/qnxuser/pickvision/run_pi.sh", "--arm"],
-                "sim":  ["python3", "fake_vision.py"],
-                "restart": true, "heartbeat_ms": 1000, "restart_after_silent_s": 20}
+    "vision":  {"cmd": ["on", "-p", "10", "sh", "/data/home/qnxuser/pickvision/run_pi.sh", "--arm"],
+                "sim":  ["on", "-p", "10", "python3", "fake_vision.py"],
+                "restart": true, "heartbeat_ms": 1000, "restart_after_silent_s": 20,
+                "restart_delay_s": 2.0}
   },
 
   "vision_port": 5622,
