@@ -222,12 +222,24 @@ class LoopTimer:
         self.reset_window()
         self.worst_ever_ms = 0.0
         self.missed_total = 0
+        self.last = {"jitter_avg_ms": 0, "jitter_max_ms": 0, "missed": 0}
 
     def reset_window(self):
         self.win_max_ms = 0.0
         self.win_sum_ms = 0.0
         self.win_n = 0
         self.win_missed = 0
+
+    def roll(self):
+        """Close the 1 s stats window (call when win_n reaches the loop rate)."""
+        self.last = {"jitter_avg_ms": round(self.win_sum_ms / max(1, self.win_n), 3),
+                     "jitter_max_ms": round(self.win_max_ms, 3),
+                     "missed": self.win_missed}
+        self.reset_window()
+
+    def stats(self):
+        return dict(self.last, worst_ever_ms=round(self.worst_ever_ms, 2),
+                    missed_total=self.missed_total, period_ms=round(self.period * 1000, 2))
 
     def wait(self):
         """Sleep until the next deadline; return lateness in ms."""
@@ -271,7 +283,6 @@ def main():
     timer = LoopTimer(cfg["loop_hz"])
     tel_every = max(1, int(cfg["loop_hz"] / cfg["telemetry_hz"]))
     cycle = 0
-    last_window = {"jitter_avg_ms": 0, "jitter_max_ms": 0, "missed": 0}
     print(f"gripper_link: port={port} {cfg['loop_hz']} Hz, cmd udp {cfg['cmd_port']}, "
           f"telemetry udp {cfg['telemetry_port']}, pid {os.getpid()}", flush=True)
 
@@ -286,8 +297,7 @@ def main():
             "over_max": grip.over_max, "profile": grip.profile,
             "link_age_ms": None if link.last_rx is None else round((now - link.last_rx) * 1000, 1),
             "frames_ok": link.frames_ok, "frames_bad": link.frames_bad, "seq_gaps": link.seq_gaps,
-            "timing": dict(last_window, worst_ever_ms=round(timer.worst_ever_ms, 2),
-                           missed_total=timer.missed_total),
+            "timing": timer.stats(),
         }
 
     while True:
@@ -320,10 +330,8 @@ def main():
             except OSError:
                 pass
         if timer.win_n >= cfg["loop_hz"]:            # once per second
-            last_window = {"jitter_avg_ms": round(timer.win_sum_ms / timer.win_n, 3),
-                           "jitter_max_ms": round(timer.win_max_ms, 3),
-                           "missed": timer.win_missed}
-            timer.reset_window()
+            timer.roll()
+            last_window = timer.last
             if not args.quiet:
                 s = status()
                 print(f"{s['state']:9s} ang={s['angle']} fsr={s['fsr1']},{s['fsr2']} "

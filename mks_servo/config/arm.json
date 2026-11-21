@@ -1,0 +1,44 @@
+{
+  "_comment": "Arm settings for motion.py. Joint angles are ARM degrees; gear_ratio = motor degrees per arm degree. PLACEHOLDER numbers: measure gear ratios, then teach pockets with arm_cmd.py jog/teach.",
+
+  "joints": {
+    "lift": {"port": "/dev/ser3", "addr": 224, "firmware": "1.1",
+             "gear_ratio": 10.0, "dir_bit_positive": 1,
+             "max_speed": 20, "min_deg": -2.0, "max_deg": 80.0},
+    "base": {"port": "/dev/ser5", "addr": 224, "firmware": "1.0",
+             "gear_ratio": 4.0, "dir_bit_positive": 1,
+             "max_speed": 15, "min_deg": -120.0, "max_deg": 120.0}
+  },
+
+  "_homing": "lift: 'hard_stop' = drive down gently until blocked (Surya's seek), or 'marked_zero' = the arm is already parked at marked_pose when motion starts. base: 'marked_zero' only.",
+  "homing": {"lift": "marked_zero", "base": "marked_zero",
+             "marked_pose": {"lift": 0.0, "base": 0.0},
+             "lift_stop_deg": 0.0, "seek_speed": 8, "seek_error_deg": 10.0,
+             "seek_max_motor_deg": 1200.0},
+  "auto_home": true,
+
+  "home_pose": {"lift": 50.0, "base": 0.0},
+  "travel_lift": 50.0,
+  "pockets": {
+    "1": {"lift": 10.0, "base": -60.0},
+    "2": {"lift": 10.0, "base": -20.0},
+    "3": {"lift": 10.0, "base": 20.0},
+    "4": {"lift": 10.0, "base": 60.0}
+  },
+
+  "tolerance_deg": 1.0,
+  "min_speed": 5,
+  "deg_per_s_per_speed": 3.8,
+  "timeout_factor": 3.0,
+  "timeout_margin_s": 2.0,
+  "progress_check_s": 0.7,
+  "min_progress_motor_deg": 1.0,
+  "v10_stop_lead_motor_deg": 1.0,
+  "grip_timeout_s": 6.0,
+  "release_timeout_s": 4.0,
+
+  "cmd_port": 5611,
+  "telemetry_port": 5612,
+  "telemetry_hz": 10,
+  "loop_hz": 50
+}
