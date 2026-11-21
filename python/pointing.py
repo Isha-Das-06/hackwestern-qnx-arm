@@ -109,6 +109,9 @@ class FakeRobot:
         print(self.last, flush=True)
         self.busy_until = now_ms() + 3000
 
+    def heartbeat(self, *a, **k):
+        pass  # no supervisor on the laptop
+
 
 # ---------------------------------------------------------------- hand trackers
 class MediapipeTracker:
@@ -180,6 +183,8 @@ def main():
                          "on the Pi; mediapipe = laptop only; auto = mediapipe if installed")
     ap.add_argument("--res", default="640x480",
                     help="QNX camera size, e.g. 1280x720 for widescreen (default 640x480)")
+    ap.add_argument("--arm", action="store_true",
+                    help="send picks to the QNX arm (motion.py) and heartbeat to its supervisor")
     ap.add_argument("--headless", action="store_true", help="no window (testing)")
     ap.add_argument("--frames", type=int, default=0, help="stop after N frames (testing)")
     ap.add_argument("--save-frame", default="", help="save the last frame here (testing)")
@@ -226,7 +231,12 @@ def main():
 
     pointer = PointerTracker()
     selector = Selector()
-    robot = FakeRobot()
+    if args.arm:
+        from arm_link import ArmRobot
+        robot = ArmRobot()
+        print("arm link: picks -> motion udp 5611, heartbeat -> supervisor udp 5622", flush=True)
+    else:
+        robot = FakeRobot()
     last_pred = [(UNKNOWN, 0.0)] * len(tray)
     last_frac = [0.0] * len(tray)  # how much of each box changed vs its empty photo
 
@@ -410,6 +420,9 @@ def main():
                       if bends else "")
                 print(f"[stat] {fps:.1f} fps | hands {len(hands)} | tip over P{over + 1}"
                       f" | pointing {'YES' if pointing else 'no'}{bs} | {selector.state}")
+
+        robot.heartbeat(fps, selector.state, last_pred,
+                        round(frame_ms[-1], 1) if frame_ms else None)
 
         # ---- draw ----
         if not args.headless or args.save_frame:  # the browser draws its own overlay
