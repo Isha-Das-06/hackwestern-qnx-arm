@@ -1,0 +1,18 @@
+{
+  "_comment": "Gripper link settings. Angles are servo degrees. Forces are raw FSR ADC counts (0-4095) until calibrated.",
+  "port": "/dev/ser4",
+  "loop_hz": 100,
+  "stale_ms": 50,
+
+  "open_angle": 150,
+  "closed_angle": 30,
+  "open_step_deg": 4.0,
+  "close_step_deg": 0.5,
+  "backoff_deg": 3.0,
+  "relax_deg": 6.0,
+  "slip_fraction": 0.5,
+
+  "cmd_port": 5601,
+  "telemetry_port": 5602,
+  "telemetry_hz": 20
+}
