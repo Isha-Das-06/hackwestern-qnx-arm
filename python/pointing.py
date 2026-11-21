@@ -20,6 +20,7 @@ import traceback
 
 import cv2
 
+from cloud_sync import CloudSync
 from classifier import BLOCK, CUP, EGG, EMPTY, NAMES, UNKNOWN, PocketClassifier
 from handtrack_tflite import HandTracker as TfliteHandTracker
 from logic import (AWAIT_CLEAR, CHOOSE_DEST, CLASSIFYING, DISPATCHED, DWELLING, FROM, IDLE,
@@ -32,6 +33,8 @@ HAND_MODEL = os.path.join(ROOT, "models", "hand_landmarker.task")
 CONFIG = os.path.join(ROOT, "config")
 TRAY_PATH = os.path.join(CONFIG, "tray.yml")
 CLF_PATH = os.path.join(CONFIG, "classifier_py.npz")
+CLOUD_CFG = os.path.join(CONFIG, "cloud.json")         # url + token for the history dashboard
+CLOUD_SPOOL = os.path.join(CONFIG, "cloud_queue.jsonl")  # unsent history while offline
 
 HAND_EDGES = [(0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8),
               (5, 9), (9, 10), (10, 11), (11, 12), (9, 13), (13, 14), (14, 15),
@@ -278,6 +281,19 @@ def main():
     cpu_prev = (sum(os.times()[:2]), time.time())
     n_cpu = os.cpu_count() or 1
 
+    cloud = CloudSync.from_config(CLOUD_CFG, CLOUD_SPOOL)  # None = off
+    t_health = time.time()
+
+    def cloud_move(m):
+        """A move is final (done / rejected / cancelled / no-response) -> send it to history."""
+        if cloud:
+            lm = health["last_move"] if m["status"] in ("done", "no-response") else None
+            cloud.send("move", obj=m["obj"], from_box=m["from"], to_box=m["to"], status=m["status"],
+                       note=m["note"], grip=m["grip"], robot_s=m.get("secs"),
+                       react_ms=m.get("react_ms"),
+                       identify_ms=lm["identify_ms"] if lm else None,
+                       choose_s=lm["choose_s"] if lm else None)
+
     def add_move(status, note=""):
         lbl = selector.label
         if lbl == UNKNOWN and selector.target >= 0:
@@ -288,6 +304,8 @@ def main():
                           "to": selector.dest + 1 if selector.dest >= 0 else 0,
                           "grip": list(grip[obj]) if obj in grip else None,
                           "status": status, "note": note, "t_sent": now_ms()})
+        if status != "moving":
+            cloud_move(moves[0])
 
     while True:
         ok, frame = cap.read()
@@ -358,12 +376,14 @@ def main():
                 health["last_move"] = {"identify_ms": round(marks.get("identify_ms", 0)),
                                        "choose_s": round(marks.get("choose_s", 0), 1),
                                        "robot_s": moves[0]["secs"]}
+                cloud_move(moves[0])
             prev_state = selector.state
         if pick:
             robot.send_pick(pick[0], pick[1], pick[2], grip)
             add_move("moving")
             if "hand_away" in marks:  # hand left the destination box -> command sent
                 health["react_ms"] = round(now_ms() - marks["hand_away"])
+                moves[0]["react_ms"] = health["react_ms"]
 
         # ---- fps ----
         frames += 1
@@ -377,6 +397,14 @@ def main():
                 health["cpu_pct"] = round(100 * (cpu_now[0] - cpu_prev[0])
                                           / (cpu_now[1] - cpu_prev[1]) / n_cpu, 1)
             cpu_prev = cpu_now
+            if cloud and time.time() - t_health >= 10 and frame_ms:  # health sample every 10 s
+                t_health = time.time()
+                ft = list(frame_ms)
+                cloud.send("health", fps=round(fps, 1), frame_ms=round(sum(ft) / len(ft), 1),
+                           worst_ms=round(max(ft), 1),
+                           ontime_pct=round(100 * sum(v <= BUDGET_MS for v in ft) / len(ft), 1),
+                           cpu_pct=health["cpu_pct"],
+                           hand_ms=round(sum(hand_ms) / len(hand_ms), 1) if hand_ms else None)
             if args.headless or hands:  # once a second, only while a hand is in view
                 bs = (f" bend I{bends['index']:.0f} M{bends['middle']:.0f} R{bends['ring']:.0f}"
                       if bends else "")
@@ -471,7 +499,8 @@ def main():
                         "now": time.time(),  # the page shows times relative to this (Pi clock may be unset)
                         "ontime_pct": round(100 * sum(v <= BUDGET_MS for v in ft) / len(ft), 1) if ft else None,
                         "jitter_ms": round((sum((v - mean) ** 2 for v in ft) / len(ft)) ** 0.5) if ft else None,
-                        **health},
+                        **health,
+                        "cloud": cloud.status() if cloud else None},
                 "sel": {"state": selector.state, "phase": selector.phase, "msg": selector.msg,
                         "from": selector.target, "to": selector.dest,
                         "obj": NAMES[selector.label] if selector.label in (EGG, CUP, BLOCK) else "",

@@ -36,6 +36,7 @@ python\.venv\Scripts\python python\pointing.py --web 8080
 | `qnx/` | `pv_cam.c`: small C bridge to the QNX camera API (OpenCV can't open cameras on QNX) |
 | `models/` | Hand tracking models (palm + landmarks, from the QNX AI workshop / MediaPipe) |
 | `config/` | Box positions, taught examples, grip ranges |
+| `cloud/` | Optional history dashboard: Vultr server + Tiger Data (TimescaleDB). The robot never depends on it. See `cloud/README.md` |
 | `design/` | Console design versions and a mock server to preview the page without a camera |
 | `src/`, `CMakeLists.txt` | Older C++ version (backup) |
 

@@ -12,3 +12,7 @@ include/
 third_party/
 # runtime log on the Pi
 pointing.log
+# cloud
+cloud/.venv/
+config/cloud.json
+config/cloud_queue.jsonl
