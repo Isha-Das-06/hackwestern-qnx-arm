@@ -32,6 +32,8 @@ laptop and on the team's QNX Pi. The old C++ version (`src/`, `run.bat`, `build.
 | `python/classifier.py` | empty/egg/cup/block classifier |
 | `python/qnx_camera.py` + `qnx/pv_cam.c` | QNX camera (OpenCV can't open cameras on QNX, so a tiny C helper reads camapi) |
 | `python/web_ui.py` | web page view + buttons (QNX OpenCV has no windows) |
+| `python/cloud_sync.py` | sends finished moves + health to the cloud history in the background (off unless `config/cloud.json` exists) |
+| `cloud/` | the cloud side: `server.py` (Vultr), `dashboard.html`, `setup_vultr.sh`, README |
 | `run_python.bat` | start it on the laptop |
 | `run_pi.sh` | start/stop it on the Pi |
 | `sync_to_pi.bat` | copy the code from the laptop to the Pi and restart it there |
@@ -81,6 +83,50 @@ Verified Nov 21 on the team Pi (QNX 8.0, reports **Raspberry Pi 4B**, IP 192.168
 
 **What I changed on the team Pi:** installed the 3 Python packages above (+ their libraries),
 created `~/pickvision/`, and added one SSH key line for this laptop to `~/.ssh/authorized_keys`.
+
+## Console fixes (Nov 21 afternoon, all on the Pi)
+
+- **Teach buttons work every click.** They were rebuilt 8×/s, so clicks got lost.
+- **Teach picks the box that changed most** when an object spills into a 2nd box (shadow, angle).
+- **Clear examples per object** (Egg / Cup / Block / All) + **Clear empty-tray photo**.
+- **Set up stays open after a refresh.**
+- **Sounds 4× louder** (with a limiter).
+- **"Unknown" label** (orange) on the camera picture for untaught objects.
+- **Stricter unknown check**: limit 6.0 → 4.2 (a phone was being called "cup").
+  Same object ≈ 1.4–3.5 apart, different objects ≈ 3.8–6.4.
+- Camera was moved higher: each object must fit inside **one** box. After moving the camera:
+  redraw boxes, new empty photo, re-teach.
+- Taught on the Pi so far: egg (a charger as stand-in), cup, block, 5 each.
+
+## Cloud history: Tiger Data + Vultr ✅ live (Nov 21)
+
+The robot runs fully offline on QNX. The cloud is only its history/diary.
+
+```
+Pi (cloud_sync.py) ──moves + health every 10 s──▶ Vultr server (server.py) ──▶ Tiger Data
+   queues to disk when offline                       shows the dashboard          (stores it)
+```
+
+- **Dashboard:** http://66.42.92.71 (moves, % finished, reaction time, frames on time, charts).
+- **Tiger Data:** free service `pickvision` (us-east-1). Uses hypertables (`moves`, `health`),
+  a continuous aggregate `health_1m` (real-time), and compression after 7 days. All 3 tested.
+  Credentials file: `Downloads\tiger-cloud-pickvision-credentials.txt` (never share or commit).
+  The old trial service `db-27771` is paused. Ignore it.
+- **Vultr:** server `pickvision`, Atlanta, `vc2-1c-1gb`, Ubuntu 24.04, ~$0.007/hr (MLH $100 credit).
+  Login from the laptop: `ssh -i %USERPROFILE%\.ssh\pickvision_vultr root@66.42.92.71`.
+  Service `pickvision-cloud` (restarts by itself). Settings in `/etc/pickvision-cloud.env`.
+  **After the hackathon: Destroy the server** (Stop still charges).
+- **Pi:** has `cloud_sync.py` + `config/cloud.json` (url + token, device `qnx-pi`). A test send
+  from the Pi worked. Real moves show up once the app runs with the camera plugged in.
+- Pitch line: "Real-time on the device, history in the cloud. Pull the internet and the robot keeps working."
+- These are 2 separate prizes: **Best Use of Tiger Data** and **Best Use of Vultr**.
+
+## GitHub
+
+Repo https://github.com/Isha-Das-06/hackwestern-qnx-arm, branch **`isha-code`**.
+The GitHub copy lives in `..\qnx-arm-repo` (this folder isn't a git repo). Left out on purpose:
+`python/.venv`, `include/` (QNX headers, licence forbids sharing), `third_party/`, `config/cloud.json`.
+**Rule: only push when Isha says so.** Not pushed yet: the `setup_vultr.sh` fix and this GAMEPLAN update.
 
 ## How a pick flows
 
@@ -143,6 +189,12 @@ or even killed while the control task keeps going.
 - **Cup vs 46 mm jaw gap**: still open. A paper cup rim is usually 70+ mm.
 
 ## Known gaps / risks
+
+- **Biggest gap: the arm isn't wired.** The teammates' Pi code (`~/mks_servo`) is only a motor
+  driver + test script. There's no control task taking picks and no saved box positions yet.
+  Ask them how they want the pick (socket / pipe / QNX message). Don't drive their motors without them.
+- **Nov 21 ~20:15 UTC: the Pi camera wasn't found** ("could not start any camera with that unit").
+  Replug the USB webcam, then start the app again.
 
 - Nobody has done point → dwell → classify with a real hand **on the Pi camera** yet
   (the Pi's camera was pointing at cables). It works on the laptop.

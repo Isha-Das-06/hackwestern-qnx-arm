@@ -56,10 +56,19 @@ Refuses if: "from" box empty / unknown object / "to" box not empty / no target c
 - Camera mount over the tray; then on the Pi web page: draw 4 boxes, empty photo, teach real egg/cup/block.
 - Shuffle accuracy test, backup video.
 
+## Nov 21 afternoon chat (third chat)
+- Console fixes: Teach reliable, per-object clear, Set up stays open, louder sounds, "Unknown" label, stricter unknown check.
+- Code pushed to GitHub branch `isha-code` (rule since: **ask before every push**).
+- Cloud history built and live: Pi → Vultr (http://66.42.92.71) → Tiger Data. See GAMEPLAN "Cloud history".
+- Vultr: use the MLH $100 credit (mlh.link/vultr-discover → Billing → Gift Code). Billed hourly; Destroy after.
+- Tiger: the first trial had expired, so a new **free** service `pickvision` was made.
+- Teammates' `mks_servo` on the Pi = motor driver only; arm wiring still needs them.
+- New chat? Start with `HANDOFF.md`.
+
 ## Prizes (from the Devpost page)
 - Main: **Best Use of QNX** ($1,000 / 2× $250). Must run on QNX + use a QNX open-source AI module (we use QNX TFLite runtime + workshop models).
 - Also enter: **Best Hardware Prototype (PCBWay)**, **Best Health Hack (Sun Life)** (pitch: grip help for people who can't grip well), **Most Adventurous**.
-- Optional: **Tiger Data + Vultr** as a cloud history/timing dashboard (robot stays real-time and offline-capable on the Pi).
+- **Best Use of Tiger Data** and **Best Use of Vultr** (2 separate MLH prizes): cloud history dashboard, built Nov 21 (robot stays real-time and offline on the Pi).
 - No limit on sponsor tracks. Select them on both the live site and Devpost (must match). Sponsors shortlist; general judging (overall 1st–3rd) is for everyone.
 - Rules: **no slide decks**, 3 min demo + 1 min Q&A per judge. Devpost deadline **Sun 9:00 AM**, demo fair **Sun 12–1 PM**.
 - Judging criteria include **Design**, so the console page was rebuilt (see below).

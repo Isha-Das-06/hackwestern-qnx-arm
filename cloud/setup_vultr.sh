@@ -24,6 +24,7 @@ chown -R pvcloud:pvcloud "$APP"
 if [ ! -f "$ENVF" ]; then
     printf "Paste the Tiger Data connection string (postgres://...): "
     read -r DBURL
+    DBURL=$(printf '%s' "$DBURL" | tr -d '\r[:space:]')   # pasted/piped from Windows may end in \r
     TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
     umask 077
     printf 'DATABASE_URL=%s\nINGEST_TOKEN=%s\n' "$DBURL" "$TOKEN" > "$ENVF"
