@@ -77,6 +77,8 @@ TIMESCALE_STEPS = [
                avg(fps) AS fps, avg(frame_ms) AS frame_ms, max(worst_ms) AS worst_ms,
                avg(ontime_pct) AS ontime_pct, avg(cpu_pct) AS cpu_pct, count(*) AS samples
         FROM health GROUP BY bucket, device WITH NO DATA"""),
+    # real-time: also include rows newer than the last refresh, so the dashboard is current
+    ("aggregate", "ALTER MATERIALIZED VIEW health_1m SET (timescaledb.materialized_only = false)"),
     ("aggregate", """
         SELECT add_continuous_aggregate_policy('health_1m',
             start_offset => INTERVAL '2 days', end_offset => INTERVAL '1 minute',
