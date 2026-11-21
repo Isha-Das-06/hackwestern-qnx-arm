@@ -1,0 +1,14 @@
+# Python
+python/.venv/
+__pycache__/
+*.pyc
+# build output
+build/
+qnx/pv_cam
+qnx/*.o
+# QNX SDK headers (licensed - come with the QNX SDK, don't commit)
+include/
+# QNX AI workshop is its own repo: https://github.com/qnx/QNX-AI-workshop
+third_party/
+# runtime log on the Pi
+pointing.log
