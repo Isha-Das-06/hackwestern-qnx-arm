@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arm Supervisor</title>
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --line:#30363d; --text:#e6edf3; --dim:#8b949e;
+          --ok:#3fb950; --warn:#d29922; --bad:#f85149; --accent:#58a6ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+           padding:12px 16px; border-bottom:1px solid var(--line); }
+  h1 { font-size:16px; margin:0 auto 0 0; letter-spacing:.02em; }
+  #banner { padding:6px 12px; border-radius:6px; font-weight:600; }
+  .ok { background:#12361f; color:var(--ok); } .warn { background:#3a2c0b; color:var(--warn); }
+  .bad { background:#3d1214; color:var(--bad); }
+  button { background:#21262d; color:var(--text); border:1px solid var(--line); border-radius:6px;
+           padding:8px 14px; font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.stop { background:#5a1d1d; border-color:#8e2b2b; font-weight:700; }
+  main { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; padding:16px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); margin:0 0 8px; }
+  .big { font-size:22px; font-weight:700; }
+  .row { display:flex; justify-content:space-between; gap:8px; padding:2px 0; }
+  .row span:first-child { color:var(--dim); }
+  .mono { font-family:ui-monospace, Consolas, monospace; font-size:12px; }
+  .bar { position:relative; height:16px; background:#0b0f14; border:1px solid var(--line);
+         border-radius:4px; margin:4px 0 8px; overflow:hidden; }
+  .bar i { position:absolute; left:0; top:0; bottom:0; background:var(--accent); }
+  .bar b { position:absolute; top:-2px; bottom:-2px; width:2px; }
+  #events { max-height:220px; overflow:auto; white-space:pre-wrap; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pick-and-place arm · QNX</h1>
+  <span id="banner" class="warn">connecting…</span>
+  <button class="stop" onclick="act('stop')">STOP</button>
+  <button onclick="act('reset')">Reset</button>
+  <button onclick="act('home')">Home</button>
+  <button onclick="act('open')">Open gripper</button>
+</header>
+<main>
+  <section><h2>Motion</h2>
+    <div class="big" id="m_state">–</div><div id="m_step" class="mono"></div>
+    <div class="row"><span>joints</span><span id="m_joints" class="mono"></span></div>
+    <div class="row"><span>picks done</span><span id="m_picks"></span></div>
+    <div class="row"><span>last result</span><span id="m_last"></span></div>
+  </section>
+  <section><h2>Gripper (force loop on QNX)</h2>
+    <div class="big" id="g_state">–</div>
+    <div class="row"><span>jaw 1</span><span id="g_f1" class="mono"></span></div>
+    <div class="bar"><i id="g_b1"></i><b id="g_t1" style="background:var(--ok)"></b><b id="g_m1" style="background:var(--bad)"></b></div>
+    <div class="row"><span>jaw 2</span><span id="g_f2" class="mono"></span></div>
+    <div class="bar"><i id="g_b2"></i><b id="g_t2" style="background:var(--ok)"></b><b id="g_m2" style="background:var(--bad)"></b></div>
+    <div class="row"><span>object / servo angle</span><span id="g_obj"></span></div>
+    <div class="row"><span>Pico link age</span><span id="g_age" class="mono"></span></div>
+  </section>
+  <section><h2>Vision</h2>
+    <div class="big" id="v_fps">–</div>
+    <div class="row"><span>pockets</span><span id="v_labels" class="mono"></span></div>
+    <div class="row"><span>state</span><span id="v_state"></span></div>
+  </section>
+  <section><h2>Real-time timing (lateness per cycle)</h2>
+    <div class="row"><span>gripper 100 Hz, prio 30</span><span id="t_g" class="mono"></span></div>
+    <div class="row"><span>motion 50 Hz, prio 30</span><span id="t_m" class="mono"></span></div>
+    <div class="row"><span>supervisor 20 Hz, prio 40</span><span id="t_s" class="mono"></span></div>
+    <div class="row"><span>vision (normal prio)</span><span id="t_v" class="mono"></span></div>
+  </section>
+  <section><h2>Processes</h2><div id="procs" class="mono"></div></section>
+  <section><h2>Events</h2><div id="events" class="mono"></div></section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const FMAX = 4095;
+function tm(t) {
+  if (!t) return "–";
+  return `max ${t.jitter_max_ms} ms · missed ${t.missed_total} · worst ${t.worst_ever_ms} ms`;
+}
+function bar(n, v, prof) {
+  $("g_b" + n).style.width = (100 * (v || 0) / FMAX) + "%";
+  $("g_t" + n).style.left = prof ? (100 * prof.target / FMAX) + "%" : "-9px";
+  $("g_m" + n).style.left = prof ? (100 * prof.max / FMAX) + "%" : "-9px";
+}
+async function act(a) {
+  try {
+    const r = await (await fetch("/" + a, {method: "POST"})).json();
+    if (!r.ok) alert(a + ": " + r.error);
+  } catch (e) { alert(a + " failed: " + e); }
+}
+async function tick() {
+  try {
+    const s = await (await fetch("/state")).json();
+    const b = $("banner");
+    if (s.fault) { b.className = "bad"; b.textContent = "FAULT: " + s.fault; }
+    else if (s.vision_down) { b.className = "warn"; b.textContent = "PAUSED: vision restarting"; }
+    else { b.className = "ok"; b.textContent = "OK" + (s.sim ? " (sim)" : ""); }
+    const m = s.motion || {}, g = s.gripper || {}, v = s.vision || {};
+    $("m_state").textContent = m.state || "no heartbeat";
+    $("m_step").textContent = m.step || "";
+    $("m_joints").textContent = m.joints ? Object.entries(m.joints).map(([k, x]) => `${k} ${x}°`).join("  ") : "";
+    $("m_picks").textContent = m.picks_done ?? "";
+    $("m_last").textContent = m.last_result || "";
+    $("g_state").textContent = (g.state || "no heartbeat") + (g.slip ? " · SLIP" : "");
+    $("g_f1").textContent = g.fsr1 ?? ""; $("g_f2").textContent = g.fsr2 ?? "";
+    bar(1, g.fsr1, g.profile); bar(2, g.fsr2, g.profile);
+    $("g_obj").textContent = `${g.object || "–"} / ${g.angle ?? "–"}°`;
+    $("g_age").textContent = g.link_age_ms != null ? g.link_age_ms + " ms" : "";
+    $("v_fps").textContent = v.fps != null ? v.fps + " fps" : "no heartbeat";
+    $("v_labels").textContent = (v.labels || []).map((l, i) => `${i + 1}:${l}`).join("  ");
+    $("v_state").textContent = (v.state || "") + (v.fake ? " (fake)" : "");
+    $("t_g").textContent = tm(g.timing); $("t_m").textContent = tm(m.timing);
+    $("t_s").textContent = tm(s.timing);
+    $("t_v").textContent = v.frame_ms != null ? `frame ${v.frame_ms} ms` : (v.fps != null ? `${v.fps} fps` : "–");
+    $("procs").innerHTML = Object.entries(s.procs).map(([n, p]) =>
+      `<div><span class="dot" style="background:${p.alive ? "var(--ok)" : "var(--bad)"}"></span>` +
+      `${n} pid ${p.pid ?? "–"} · restarts ${p.restarts} · silent ${p.silent_ms} ms</div>`).join("");
+    $("events").textContent = s.events.join("\n");
+  } catch (e) {
+    $("banner").className = "bad"; $("banner").textContent = "supervisor not reachable";
+  }
+}
+setInterval(tick, 200); tick();
+</script>
+</body>
+</html>

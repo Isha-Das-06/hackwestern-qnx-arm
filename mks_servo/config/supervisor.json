@@ -1,0 +1,22 @@
+{
+  "_comment": "Supervisor: starts the other three processes and watches them. {sim} lines are used with --sim (fake Pico, fake motors, fake vision).",
+
+  "procs": {
+    "gripper": {"cmd": ["on", "-p", "30", "python3", "gripper_link.py", "--quiet"],
+                "sim":  ["on", "-p", "30", "python3", "gripper_link.py", "--quiet", "--port", "{fake_pico_port}"],
+                "restart": false, "heartbeat_ms": 250},
+    "motion":  {"cmd": ["on", "-p", "30", "python3", "motion.py"],
+                "sim":  ["on", "-p", "30", "python3", "motion.py", "--sim", "4"],
+                "restart": false, "heartbeat_ms": 500},
+    "vision":  {"cmd": ["sh", "/data/home/qnxuser/pickvision/run_pi.sh", "--arm"],
+                "sim":  ["python3", "fake_vision.py"],
+                "restart": true, "heartbeat_ms": 1000, "restart_after_silent_s": 20}
+  },
+
+  "vision_port": 5622,
+  "estop_path": "/dev/gpio/17",
+  "estop_sim_path": "/tmp/fake_estop",
+  "_estop": "NC button contact between GPIO17 (pin 11) and GND (pin 9), pull-up on: 0 = OK, 1 = pressed OR wire broken (fails safe).",
+  "web_port": 8090,
+  "loop_hz": 20
+}

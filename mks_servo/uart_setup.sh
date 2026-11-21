@@ -32,3 +32,8 @@ start_uart() {  # unit tx rx base
 start_uart 3 4 5 0xfe201600
 start_uart 5 12 13 0xfe201a00
 start_uart 4 8 9 0xfe201800
+
+# E-stop sense input: GPIO17 (pin 11), pull-up on. Wire the button's NC
+# contact from pin 11 to GND (pin 9): reads 0 = OK, 1 = pressed or wire broken.
+gpio-bcm2711 set 17 ip pu
+echo "e-stop input GPIO17 ready (reads $(cat /dev/gpio/17 2>/dev/null))"
