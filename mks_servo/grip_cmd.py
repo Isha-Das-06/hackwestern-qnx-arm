@@ -6,6 +6,8 @@ grip_cmd: send one command to gripper_link and print its reply.
     python3 grip_cmd.py grip egg        (egg / cup / block, see grip_profiles.json)
     python3 grip_cmd.py hold
     python3 grip_cmd.py relax
+    python3 grip_cmd.py angle 95        (calibration: move slowly to servo 95 deg,
+                                         stopping early if a jaw feels force)
     python3 grip_cmd.py watch           (status 5x per second until Ctrl-C)
 """
 
@@ -50,6 +52,8 @@ if __name__ == "__main__":
     msg = {"cmd": cmd}
     if cmd == "GRIP":
         msg["object"] = sys.argv[2] if len(sys.argv) > 2 else "egg"
+    elif cmd == "ANGLE":
+        msg["angle"] = float(sys.argv[2])
     r = send(msg)
     print(json.dumps(r) if "-v" in sys.argv else short(r))
     sys.exit(0 if r.get("ok") else 1)

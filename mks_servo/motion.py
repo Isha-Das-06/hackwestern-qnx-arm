@@ -8,22 +8,30 @@ Pick sequence (one command from vision does all of it):
     IDLE -> MOVE_TO_PICK -> LOWER -> GRIP -> LIFT -> MOVE_TO_PLACE -> LOWER
          -> RELEASE -> HOME -> IDLE          and FAULT from anywhere.
 
+Joint units: the lift works in mm of carriage travel, the base in degrees of
+yaw. gear_ratio in config/arm.json converts them to motor degrees.
+
 Safety rules, each one sentence:
-  - Pocket positions are fixed, taught joint angles (config/arm.json); no IK.
-  - Every target is checked against the joint's soft limits before moving.
+  - Pocket positions are fixed, taught joint positions; no IK.
+  - Homing seeks the lift's bottom stop at power-up (and the base's, if set).
+  - Every target is checked against the joint's soft limits before moving, and
+    motion refuses to run if any pocket or pose is outside them.
   - Targets are absolute, so errors never add up from move to move.
   - Both joints move together: speeds are scaled so they arrive together.
+  - If a motor falls too far behind its commanded angle, something is in the
+    way: stop, stop pushing on it, hold, FAULT.
   - Every move has a time limit, and if a joint stops making progress we stop
     (motor 2's V1.0 firmware has no stall detection of its own).
   - Any fault = stop and HOLD (motors stay enabled, gripper keeps its grip).
-  - PAUSE (sent by the supervisor when vision is down) stops and holds, and
-    RESUME continues the same move from where the arm is.
+  - PAUSE (vision down, or a hand in view) stops and holds, and RESUME
+    continues the same move from where the arm is.
   - If the object slips while carrying it, we stop and hold (FAULT).
 
 Commands: one JSON object per UDP packet to 127.0.0.1:<cmd_port>; the reply
 is the status. See arm_cmd.py.
-  PICK {from, to, label}  HOME  JOG {joint, deg}  TEACH {pocket}
+  PICK {from, to, label}  HOME  JOG {joint, amount}  TEACH {pocket}  CALIBRATE
   PAUSE  RESUME  FAULT {reason}  STOP  RESET  STATUS
+Taught pockets and measured travel are saved in config/taught.json.
 Telemetry / heartbeat: status JSON to 127.0.0.1:<telemetry_port> at 10 Hz.
 """
 
@@ -37,7 +45,17 @@ import time
 
 from gripper_link import HERE, LoopTimer, load_json
 from mks_servo import Servo42C, ServoError
-from servo_test import AngleTracker, run_until_blocked
+from servo_test import SEEK_BACKOFF_DEG, AngleTracker, run_until_blocked
+
+TAUGHT = os.path.join(HERE, "config", "taught.json")
+
+
+def load_taught():
+    try:
+        with open(TAUGHT) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
 
 
 class Fault(Exception):
@@ -49,13 +67,20 @@ class Rejected(Exception):
 
 
 class Joint:
-    """One arm joint = one SERVO42C, in arm degrees."""
+    """One arm joint = one SERVO42C, in the joint's own unit (lift mm, base deg)."""
 
     def __init__(self, name, cfg, motor):
         self.name, self.cfg, self.m = name, cfg, motor
         self.ratio = cfg["gear_ratio"]
+        self.unit = cfg.get("unit", "deg")
         self.zero = 0.0                   # motor degrees where the joint is at 0
+        self.lo, self.hi = cfg["min"], cfg["max"]   # soft limits (narrowed by measured travel)
         self.tracker = None if motor.has_checksum else AngleTracker(motor)
+
+    def reset_tracker(self):
+        """V1.0 only: after a seek turned the shaft without us polling it."""
+        if self.tracker is not None:
+            self.tracker = AngleTracker(self.m)
 
     def motor_deg(self):
         """Multi-turn motor position. V1.0's encoder wraps, so we unwrap it."""
@@ -68,9 +93,9 @@ class Joint:
         return (self.motor_deg() - self.zero) / self.ratio
 
     def check_limits(self, target):
-        if not self.cfg["min_deg"] <= target <= self.cfg["max_deg"]:
-            raise Rejected(f"{self.name} {target:.1f} deg is outside its limits "
-                           f"[{self.cfg['min_deg']}, {self.cfg['max_deg']}]")
+        if not self.lo <= target <= self.hi:
+            raise Rejected(f"{self.name} {target:.1f} {self.unit} is outside its limits "
+                           f"[{self.lo:.1f}, {self.hi:.1f}]")
 
     def direction(self, motor_delta):
         bit = self.cfg["dir_bit_positive"]
@@ -96,6 +121,8 @@ class Motion:
         self.carrying = False              # object in the jaws: watch for slip
         self.sim = sim
         self.joints = {}
+        self.taught = load_taught()                 # Pi-owned: pockets + measured travel
+        self.cfg["pockets"].update(self.taught.get("pockets", {}))
         self.grip_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.grip_sock.settimeout(0.3)
 
@@ -104,16 +131,52 @@ class Motion:
         for name, jc in self.cfg["joints"].items():
             if self.sim:
                 from sim_servo import FakeServo
-                # The fake lift has a hard stop at motor 0 deg and starts above it.
+                # Fake hard stops: the lift's bottom at motor 0 (starting above
+                # it), the base at +-90 deg either side of where it starts.
                 m = FakeServo(jc["port"], name=name, firmware=jc["firmware"],
-                              hard_min=0.0 if name == "lift" else None,
+                              hard_min=0.0 if name == "lift" else -90.0,
+                              hard_max=None if name == "lift" else 90.0,
                               start_deg=60.0 if name == "lift" else 0.0,
                               speedup=self.sim)
             else:
                 m = Servo42C(jc["port"], addr=jc["addr"], name=name, firmware=jc["firmware"])
-            m.init()            # Surya's init: accel, microsteps, stall protection
-            m.enable(True)      # init ends released; an arm must hold
             self.joints[name] = Joint(name, jc, m)
+            self.prepare_motor(self.joints[name])
+        self.apply_limits()
+
+    def prepare_motor(self, j):
+        """Surya's init (accel, microsteps, stall protection), then enable and hold."""
+        j.m.init()
+        if j.m.has_checksum and not j.cfg.get("stall_protection", True):
+            # A tripped stall protection RELEASES the shaft, and the lift
+            # backdrives: it would drop. Our lag check stops it instead.
+            j.m.set_protection(False)
+        j.m.enable(True)        # init ends released; an arm must hold
+
+    def apply_limits(self):
+        """Soft limits = configured range, narrowed to the measured travel minus a margin."""
+        for name, j in self.joints.items():
+            j.lo, j.hi = j.cfg["min"], j.cfg["max"]
+            travel = self.taught.get("travel", {}).get(name)
+            if travel:
+                margin = j.cfg.get("limit_margin", 0.0)
+                j.lo, j.hi = max(j.lo, travel[0] + margin), min(j.hi, travel[1] - margin)
+
+    def check_config(self):
+        """Refuse to run if any pocket or pose is outside the soft limits."""
+        poses = {f"pocket {p}": v for p, v in self.cfg["pockets"].items()}
+        poses["home_pose"] = self.cfg["home_pose"]
+        poses["travel height"] = {"lift": self.cfg["travel_lift"]}
+        bad = [f"{label} {name}={v} outside [{self.joints[name].lo:.1f}, {self.joints[name].hi:.1f}]"
+               for label, pose in poses.items() for name, v in pose.items()
+               if not self.joints[name].lo <= v <= self.joints[name].hi]
+        if bad:
+            raise Fault("config: " + "; ".join(bad))
+
+    def save_taught(self):
+        with open(TAUGHT + ".tmp", "w") as f:
+            json.dump(self.taught, f, indent=2)
+        os.replace(TAUGHT + ".tmp", TAUGHT)
 
     # -------------------------------------------------------- gripper client
     def gripper(self, msg):
@@ -150,37 +213,81 @@ class Motion:
         if self.abort.is_set():
             raise Fault(self.fault or "stopped")
 
+    def wait_if_paused(self):
+        """PAUSE (vision down or a hand in view): hold here until RESUME."""
+        if not self.paused.is_set():
+            return
+        self.hold_all()
+        before, self.state = self.state, "PAUSED"
+        while self.paused.is_set():
+            self.checkpoint()
+            time.sleep(0.05)
+        self.state = before
+
+    def relieve(self, j, back_bit, lag):
+        """After hitting something: pull the commanded angle back to where the
+        shaft actually is, so the motor stops pushing on it. Best effort."""
+        try:
+            j.m.stop()
+            speed = self.cfg["min_speed"]
+            if j.m.has_checksum:
+                j.m.move(back_bit, speed, int(abs(lag) / 360.0 * j.m.PULSES_PER_REV))
+                time.sleep(abs(lag) / (speed * self.cfg["deg_per_s_per_speed"]) + 0.1)
+            else:
+                j.m.run(back_bit, speed)
+                deadline = time.monotonic() + 1.0
+                while abs(j.m.shaft_error_degrees()) > 1.5 and time.monotonic() < deadline:
+                    time.sleep(0.02)
+            j.m.stop()
+        except (ServoError, OSError):
+            pass
+
     # ------------------------------------------------------------- moving
-    def move_to(self, targets, step):
-        """Coordinated absolute move of one or both joints, in arm degrees."""
+    def move_to(self, targets, step, approach=True):
+        """Coordinated absolute move of one or both joints, in joint units."""
         self.step = step
         if self.homed:
             for name, t in targets.items():
                 self.joints[name].check_limits(t)
         c = self.cfg
+        if approach and self.homed:
+            # Gear play: a joint with "approach" always finishes its move turning
+            # that way, so the play is taken up the same way at every pocket.
+            for name, t in targets.items():
+                j = self.joints[name]
+                side = j.cfg.get("approach")
+                if side and (t - j.deg()) * side < -c["tolerance"] * 0.5:
+                    pre = t - side * j.cfg["approach_overshoot"]
+                    if j.lo <= pre <= j.hi:
+                        self.move_to(dict(targets, **{name: pre}), step, approach=False)
+                        self.step = step
         tries = 0                           # 1 move + up to 2 small corrections
         while tries < 3:
             self.checkpoint()
+            self.wait_if_paused()
             todo = {}
             for name, t in targets.items():
                 j = self.joints[name]
                 d = (t - j.deg()) * j.ratio         # motor degrees to go
-                if abs(d) / j.ratio > c["tolerance_deg"] * 0.5:
+                if abs(d) / j.ratio > c["tolerance"] * 0.5:
                     todo[name] = d
             if not todo:
                 return
             if self._run_move(todo):        # False = paused part-way: re-plan, same try
                 tries += 1
         for name, t in targets.items():
-            err = abs(self.joints[name].deg() - t)
-            if err > c["tolerance_deg"]:
-                raise Fault(f"{name} missed its target by {err:.1f} deg")
+            j = self.joints[name]
+            err = abs(j.deg() - t)
+            if err > c["tolerance"]:
+                raise Fault(f"{name} missed its target by {err:.1f} {j.unit}")
 
     def _run_move(self, todo):
         c = self.cfg
         k = c["deg_per_s_per_speed"]
-        # Same arrival time for all joints: the slowest one sets the time.
-        t_move = max(abs(d) / (self.joints[n].cfg["max_speed"] * k) for n, d in todo.items())
+        # Same arrival time for all joints: the slowest one sets the time. Short
+        # corrections get at least min_move_s, so they run slowly and land.
+        t_move = max([abs(d) / (self.joints[n].cfg["max_speed"] * k) for n, d in todo.items()]
+                     + [c["min_move_s"]])
         active = {}
         for name, d in todo.items():
             j = self.joints[name]
@@ -193,7 +300,7 @@ class Motion:
                 done0 = None
                 j.m.run(j.direction(d), speed)
             active[name] = {"d": d, "start": start, "done0": done0, "last": start,
-                            "speed": speed}
+                            "speed": speed, "over": 0}
         deadline = time.monotonic() + t_move * c["timeout_factor"] + c["timeout_margin_s"]
         next_progress = time.monotonic() + c["progress_check_s"]
         next_stall = next_slip = time.monotonic() + 0.5
@@ -202,13 +309,20 @@ class Motion:
                 time.sleep(0.02)
                 self.checkpoint()
                 if self.paused.is_set():
-                    self.hold_all()
-                    self.state_before_pause, self.state = self.state, "PAUSED"
-                    while self.paused.is_set():
-                        self.checkpoint()
-                        time.sleep(0.05)
-                    self.state = self.state_before_pause
+                    self.wait_if_paused()
                     return False
+                # Obstruction: the shaft falls behind the commanded angle (0x39).
+                # Turning freely it lags 2-5 motor deg; blocked, it passes 10 in ~0.2 s.
+                for name, a in active.items():
+                    j = self.joints[name]
+                    lag = j.m.shaft_error_degrees()
+                    a["over"] = a["over"] + 1 if abs(lag) >= j.cfg["lag_limit_motor_deg"] else 0
+                    if a["over"] >= c["lag_polls"]:
+                        for other in active:
+                            self.joints[other].m.stop()
+                        self.relieve(j, j.direction(a["d"]) ^ 1, lag)
+                        raise Fault(f"{name} blocked: {abs(lag):.1f} motor deg behind "
+                                    f"(something in the way)")
                 now = time.monotonic()
                 self.joints_now = {n: round(j.deg(), 2) for n, j in self.joints.items()}
                 for name in list(active):
@@ -216,7 +330,11 @@ class Motion:
                     pos = j.motor_deg()
                     moved = (pos - a["start"]) * (1 if a["d"] > 0 else -1)
                     if a["done0"] is None:
-                        if moved >= abs(a["d"]) - c["v10_stop_lead_motor_deg"]:
+                        # V1.0: stop a little early, by about what it turns before
+                        # the stop lands (never more than half the move).
+                        lead = min(c["v10_stop_lead_s"] * a["speed"] * c["deg_per_s_per_speed"],
+                                   abs(a["d"]) / 2)
+                        if moved >= abs(a["d"]) - lead:
                             j.m.stop()
                             del active[name]
                     elif j.m.moves_completed > a["done0"] or moved >= abs(a["d"]) - 0.2:
@@ -246,19 +364,65 @@ class Motion:
             raise
 
     # ------------------------------------------------------------ the jobs
+    def seek(self, j, toward):
+        """Drive a joint slowly into its hard stop (toward = +1 / -1 in joint
+        units). Returns motor degrees turned before contact; ends
+        SEEK_BACKOFF_DEG motor degrees off the stop, holding."""
+        hj = self.cfg["homing"][j.name]
+        bit = j.cfg["dir_bit_positive"] if toward > 0 else j.cfg["dir_bit_positive"] ^ 1
+        turned = run_until_blocked(j.m, bit, self.cfg["homing"]["seek_speed"],
+                                   hj["seek_error_deg"], hj["seek_max_motor_deg"],
+                                   protection_after=j.cfg.get("stall_protection", True))
+        j.reset_tracker()
+        return turned
+
+    def home_joint(self, j):
+        hj = self.cfg["homing"][j.name]
+        if hj["mode"] == "hard_stop":
+            self.step = f"{j.name}: seeking its stop"
+            self.seek(j, hj["toward"])
+            here = hj["stop_at"] - hj["toward"] * SEEK_BACKOFF_DEG / j.ratio
+        else:
+            here = hj["marked_at"]          # the arm was parked on its mark
+        j.zero = j.motor_deg() - here * j.ratio
+
     def do_home(self):
+        """Lift first (down to its stop, then up to travel height, so the jaws
+        clear the docks), then the base, then the home pose."""
         self.state = "HOMING"
-        h = self.cfg["homing"]
-        for name, j in self.joints.items():
-            mode = h.get(name, "marked_zero")
-            if mode == "hard_stop":
-                self.step = f"{name}: seeking hard stop"
-                run_until_blocked(j.m, j.cfg["dir_bit_positive"] ^ 1, h["seek_speed"],
-                                  h["seek_error_deg"], h["seek_max_motor_deg"])
-                j.zero = j.motor_deg() - h["lift_stop_deg"] * j.ratio
-            else:
-                j.zero = j.motor_deg() - h["marked_pose"][name] * j.ratio
+        self.homed = False
+        self.home_joint(self.joints["lift"])
+        self.move_to({"lift": self.cfg["travel_lift"]}, "lift to travel height")
+        self.home_joint(self.joints["base"])
         self.homed = True
+        self.check_config()
+        self.move_to(self.cfg["home_pose"], "going to home pose")
+
+    def do_calibrate(self):
+        """Measure the real travel of joints with calibrate_both_ends by seeking
+        both stops, and save it to taught.json (it narrows the soft limits).
+        The far stop also re-zeroes the joint, so no separate homing is needed."""
+        self.state = "CALIBRATING"
+        self.homed = False
+        self.move_to({"lift": self.cfg["travel_lift"]}, "lift to travel height")
+        travel = self.taught.setdefault("travel", {})
+        for name, j in self.joints.items():
+            hj = self.cfg["homing"][name]
+            if not hj.get("calibrate_both_ends"):
+                continue
+            self.step = f"{name}: seeking its first stop"
+            self.seek(j, hj["toward"])
+            self.step = f"{name}: seeking the other stop"
+            span = (self.seek(j, -hj["toward"]) + SEEK_BACKOFF_DEG) / j.ratio
+            far = hj["stop_at"] - hj["toward"] * span
+            here = far + hj["toward"] * SEEK_BACKOFF_DEG / j.ratio
+            j.zero = j.motor_deg() - here * j.ratio
+            travel[name] = sorted([round(hj["stop_at"], 2), round(far, 2)])
+            print(f"motion: {name} travel {travel[name]} {j.unit}", flush=True)
+        self.save_taught()
+        self.apply_limits()
+        self.homed = True
+        self.check_config()
         self.move_to(self.cfg["home_pose"], "going to home pose")
 
     def do_pick(self, src, dst, label):
@@ -296,10 +460,10 @@ class Motion:
         self.picks_done += 1
         return "done"
 
-    def do_jog(self, name, deg):
+    def do_jog(self, name, amount):
         self.state = "JOG"
         j = self.joints[name]
-        self.move_to({name: j.deg() + deg}, f"jog {name} {deg:+.1f}")
+        self.move_to({name: j.deg() + amount}, f"jog {name} {amount:+.1f} {j.unit}")
 
     def worker(self):
         """The only thread that talks to the motors."""
@@ -328,12 +492,17 @@ class Motion:
                     self.last_result = self.do_pick(*job[1:])
                 elif job[0] == "JOG":
                     self.do_jog(*job[1:])
+                elif job[0] == "CALIBRATE":
+                    self.do_calibrate()
+                    self.last_result = f"calibrated: {self.taught['travel']}"
                 elif job[0] == "REINIT":
                     self.state = "STARTING"
-                    for j in self.joints.values():
-                        j.m.init()
-                        j.m.enable(True)
-                        j.tracker = None if j.m.has_checksum else AngleTracker(j.m)
+                    if len(self.joints) < len(self.cfg["joints"]):
+                        self.open_motors()          # setup failed earlier (no power?)
+                    else:
+                        for j in self.joints.values():
+                            self.prepare_motor(j)
+                            j.reset_tracker()
                     if self.cfg.get("auto_home"):
                         self.do_home()
                 self.state, self.step = ("IDLE" if self.homed else "UNHOMED"), ""
@@ -410,32 +579,32 @@ class Motion:
             name = msg.get("joint")
             if name not in self.cfg["joints"]:
                 return f"unknown joint {name!r}"
-            self.jobs.put(("JOG", name, float(msg.get("deg", 0))))
+            amount = float(msg.get("amount", msg.get("deg", 0)))
+            if not self.homed and abs(amount) > self.cfg["unhomed_jog_max"]:
+                return f"not homed: jog at most {self.cfg['unhomed_jog_max']} at a time"
+            self.jobs.put(("JOG", name, amount))
+        elif cmd == "CALIBRATE":
+            if not self.homed:
+                return "home first"
+            self.jobs.put(("CALIBRATE",))
         elif cmd == "TEACH":
             pocket = str(msg.get("pocket"))
             if not self.homed:
                 return "home first"
             self.cfg["pockets"][pocket] = dict(self.joints_now)
-            self.save_pockets()
+            self.taught.setdefault("pockets", {})[pocket] = dict(self.joints_now)
+            self.save_taught()
         else:
             return f"unknown cmd {cmd!r}"
         self.state = "QUEUED" if cmd != "TEACH" else self.state
         return None
-
-    def save_pockets(self):
-        path = os.path.join(HERE, "config", "arm.json")
-        with open(path) as f:
-            full = json.load(f)
-        full["pockets"] = self.cfg["pockets"]
-        with open(path + ".tmp", "w") as f:
-            json.dump(full, f, indent=2)
-        os.replace(path + ".tmp", path)
 
     def status(self, timer):
         return {"t": time.time(), "state": self.state, "step": self.step,
                 "busy": self.busy() or self.job is not None, "homed": self.homed,
                 "fault": self.fault, "paused": self.paused.is_set(),
                 "joints": self.joints_now, "job": self.job and list(self.job),
+                "limits": {n: [round(j.lo, 1), round(j.hi, 1)] for n, j in self.joints.items()},
                 "picks_done": self.picks_done, "last_result": self.last_result,
                 "sim": self.sim, "timing": timer.stats()}
 

@@ -8,7 +8,7 @@
 // It never squeezes harder and never opens on its own.
 //
 // Wiring (pins picked for this build, see docs/GRIPPER.md):
-//   FSR jaw 1  -> GP26 (ADC0), divider: 3V3 - FSR - GP26 - 10k - GND
+//   FSR jaw 1  -> GP26 (ADC0), divider: 3V3 - FSR - GP26 - 3.3k - GND
 //   FSR jaw 2  -> GP27 (ADC1), same divider
 //   Servo PWM  -> GP16 (servo gets its own 5-6 V supply; grounds joined)
 //   UART0 TX   -> GP0 (pin 1)  -> Pi GPIO9 RX (pin 21)

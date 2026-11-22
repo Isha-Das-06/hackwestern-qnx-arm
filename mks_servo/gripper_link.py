@@ -17,6 +17,8 @@ If QNX goes silent, the Pico freezes the servo by itself after 100 ms.
 Commands: one JSON object per UDP packet to 127.0.0.1:<cmd_port>, reply is
 the status JSON.  {"cmd": "OPEN" | "GRIP" | "HOLD" | "RELAX" | "STATUS",
 "object": "egg"}  (object only for GRIP).  See grip_cmd.py.
+For calibrating the jaw travel: {"cmd": "ANGLE", "angle": 95} moves slowly to
+that servo angle and stops early if either jaw feels calib_max_force.
 Telemetry: status JSON sent by UDP to 127.0.0.1:<telemetry_port> at 20 Hz
 (this is also our heartbeat for the supervisor).
 """
@@ -112,13 +114,14 @@ class Gripper:
 
     States: WAITING (no Pico yet), OPENING, OPEN, CLOSING, GRIPPED, HOLD,
             NO_OBJECT (closed fully, never reached target), OVER_FORCE (backed
-            off 3 times, gave up and holds), STALE (link lost).
+            off 3 times, gave up and holds), STALE (link lost), MOVING (ANGLE).
     """
 
     def __init__(self, cfg, profiles):
         self.cfg, self.profiles = cfg, profiles
         self.state = "WAITING"
         self.angle = None            # commanded angle (float); None until known
+        self.target = None           # ANGLE command target
         self.profile = None          # active {"target", "max"}
         self.obj = None
         self.slip = False            # sticky until the next command
@@ -147,6 +150,9 @@ class Gripper:
         elif cmd == "RELAX":
             self.angle = self._toward_open(self.angle, self.cfg["relax_deg"])
             self.state, self.profile = "HOLD", None
+        elif cmd == "ANGLE":
+            self.target = max(0.0, min(180.0, float(msg.get("angle", self.angle))))
+            self.state, self.profile, self.obj = "MOVING", None, None
         else:
             return f"unknown cmd {cmd!r}"
         self.slip = False
@@ -171,8 +177,9 @@ class Gripper:
         fsr1, fsr2, pico_angle, _, _ = link.latest
         if self.state in ("WAITING", "STALE"):
             # (Re)connected. Start from where the Pico says the servo is; if it
-            # was never attached, use the open angle. Then just hold.
-            self.angle = float(pico_angle if not (link.latest[3] & 0x02) else cfg["open_angle"])
+            # was never attached, the servo jumps to attach_angle (its centre,
+            # where the jaws sit mid-travel), so that must be a safe spot.
+            self.angle = float(pico_angle if not (link.latest[3] & 0x02) else cfg["attach_angle"])
             self.state = "HOLD"
         force, peak = (fsr1 + fsr2) / 2.0, max(fsr1, fsr2)
 
@@ -193,7 +200,15 @@ class Gripper:
         if over:
             return
 
-        if self.state == "OPENING":
+        if self.state == "MOVING":
+            if peak > cfg["calib_max_force"]:
+                self.state = "HOLD"          # touched something: stop right here
+            else:
+                s = cfg["calib_step_deg"]
+                self.angle += max(-s, min(s, self.target - self.angle))
+                if self.angle == self.target:
+                    self.state = "HOLD"
+        elif self.state == "OPENING":
             self.angle = self._toward_open(self.angle, cfg["open_step_deg"])
             if self.angle == cfg["open_angle"]:
                 self.state = "OPEN"
@@ -210,7 +225,7 @@ class Gripper:
                 self.slip = True     # motion reads this and stops / re-grips
 
     def hold_flag(self):
-        return self.state not in ("OPENING", "CLOSING")
+        return self.state not in ("OPENING", "CLOSING", "MOVING")
 
 
 class LoopTimer:

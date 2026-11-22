@@ -1,39 +1,49 @@
 {
-  "_comment": "Arm settings for motion.py. Joint angles are ARM degrees; gear_ratio = motor degrees per arm degree. PLACEHOLDER numbers: measure gear ratios, then teach pockets with arm_cmd.py jog/teach.",
+  "_comment": "Arm settings for motion.py. Lift in mm of carriage travel, base in degrees of yaw (CAD: 0 = boom along +X, positive = counterclockwise from above). gear_ratio = motor degrees per unit. Taught pockets and measured travel live in config/taught.json on the Pi (TEACH / CALIBRATE).",
 
+  "_joints": "lift: rack and pinion, 20T m1.2 pinion = 75.40 mm per motor turn (360/75.40 = 4.7746). It backdrives when the motor lets go, so its stall protection stays OFF (a trip releases the shaft). base: motor drives the turntable 1:1 through the B06 adapter; the 0.3 mm tab play is taken up by always finishing a move turning the 'approach' way. dir_bit_positive: CHECK on the arm (jog lift +5 must go UP, jog base +5 must turn counterclockwise from above).",
   "joints": {
-    "lift": {"port": "/dev/ser3", "addr": 224, "firmware": "1.1",
-             "gear_ratio": 10.0, "dir_bit_positive": 1,
-             "max_speed": 20, "min_deg": -2.0, "max_deg": 80.0},
-    "base": {"port": "/dev/ser5", "addr": 224, "firmware": "1.0",
-             "gear_ratio": 4.0, "dir_bit_positive": 1,
-             "max_speed": 15, "min_deg": -120.0, "max_deg": 120.0}
+    "lift": {"port": "/dev/ser3", "addr": 224, "firmware": "1.1", "unit": "mm",
+             "gear_ratio": 4.7746, "dir_bit_positive": 1, "stall_protection": false,
+             "max_speed": 20, "min": 0.0, "max": 65.0, "limit_margin": 0.5,
+             "lag_limit_motor_deg": 10.0},
+    "base": {"port": "/dev/ser5", "addr": 224, "firmware": "1.0", "unit": "deg",
+             "gear_ratio": 1.0, "dir_bit_positive": 1,
+             "max_speed": 10, "min": -80.0, "max": 80.0, "limit_margin": 3.0,
+             "lag_limit_motor_deg": 10.0, "approach": 1, "approach_overshoot": 3.0}
   },
 
-  "_homing": "lift: 'hard_stop' = drive down gently until blocked (Surya's seek), or 'marked_zero' = the arm is already parked at marked_pose when motion starts. base: 'marked_zero' only.",
-  "homing": {"lift": "marked_zero", "base": "marked_zero",
-             "marked_pose": {"lift": 0.0, "base": 0.0},
-             "lift_stop_deg": 0.0, "seek_speed": 8, "seek_error_deg": 10.0,
-             "seek_max_motor_deg": 1200.0},
-  "auto_home": true,
+  "_homing": "hard_stop = drive slowly into the stop until the motor lags (Surya's seek), then that spot is stop_at. marked_zero = the arm is parked at marked_at when motion starts. The lift's bottom stop is the pick height (pads meet a seated object). Base: switch to hard_stop once the V1.0 seek is tested; calibrate_both_ends measures its real travel (CALIBRATE).",
+  "homing": {
+    "seek_speed": 8,
+    "lift": {"mode": "hard_stop", "toward": -1, "stop_at": 0.0,
+             "seek_error_deg": 10.0, "seek_max_motor_deg": 450.0},
+    "base": {"mode": "marked_zero", "marked_at": 0.0, "toward": -1, "stop_at": -82.0,
+             "seek_error_deg": 10.0, "seek_max_motor_deg": 220.0, "calibrate_both_ends": true}
+  },
+  "auto_home": false,
+  "unhomed_jog_max": 5.0,
 
-  "home_pose": {"lift": 50.0, "base": 0.0},
-  "travel_lift": 50.0,
+  "_poses": "Pockets default to the CAD docks (145 mm radius): A -60, B -20, OUT +20, C +60 deg. Vision box N = pocket N; TEACH overrides these in taught.json.",
+  "home_pose": {"lift": 40.0, "base": 0.0},
+  "travel_lift": 40.0,
   "pockets": {
-    "1": {"lift": 10.0, "base": -60.0},
-    "2": {"lift": 10.0, "base": -20.0},
-    "3": {"lift": 10.0, "base": 20.0},
-    "4": {"lift": 10.0, "base": 60.0}
+    "1": {"lift": 1.0, "base": -60.0},
+    "2": {"lift": 1.0, "base": -20.0},
+    "3": {"lift": 1.0, "base": 20.0},
+    "4": {"lift": 1.0, "base": 60.0}
   },
 
-  "tolerance_deg": 1.0,
+  "tolerance": 1.0,
   "min_speed": 5,
   "deg_per_s_per_speed": 3.8,
+  "lag_polls": 3,
   "timeout_factor": 3.0,
   "timeout_margin_s": 2.0,
   "progress_check_s": 0.7,
   "min_progress_motor_deg": 1.0,
-  "v10_stop_lead_motor_deg": 1.0,
+  "v10_stop_lead_s": 0.02,
+  "min_move_s": 0.3,
   "grip_timeout_s": 6.0,
   "release_timeout_s": 4.0,
 

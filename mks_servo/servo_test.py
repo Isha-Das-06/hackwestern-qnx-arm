@@ -206,11 +206,12 @@ def start_turning(m, direction, speed, limit_deg):
 
 
 def run_until_blocked(m, direction, speed=SEEK_SPEED, error_deg=SEEK_ERROR_DEG,
-                      max_deg=360.0, backoff_deg=SEEK_BACKOFF_DEG, timeout=30.0):
+                      max_deg=360.0, backoff_deg=SEEK_BACKOFF_DEG, timeout=30.0,
+                      protection_after=True):
     """Turn until something stops the shaft, then back off `backoff_deg`.
 
     Returns the degrees turned before contact, and leaves the motor enabled
-    and holding. Raises ServoError, after stopping and releasing the motor,
+    and holding. Raises ServoError, after stopping the motor (still holding),
     if it turns `max_deg` without meeting resistance or a command fails.
 
     Resistance shows up as shaft error (0x39): the driver's target keeps
@@ -220,6 +221,7 @@ def run_until_blocked(m, direction, speed=SEEK_SPEED, error_deg=SEEK_ERROR_DEG,
     V1.1's stall protection is off during the seek. It trips within about
     0.3 s of the shaft stopping, before the error check, and it releases the
     shaft; re-arming it after a trip was followed by a ~60 deg jump.
+    `protection_after` is what it is set to afterwards.
     """
     try:
         if m.is_stalled():
@@ -269,7 +271,7 @@ def run_until_blocked(m, direction, speed=SEEK_SPEED, error_deg=SEEK_ERROR_DEG,
         raise
     finally:
         if m.has_checksum:
-            m.set_protection(True)
+            m.set_protection(protection_after)
 
 
 def cmd_seek(args):

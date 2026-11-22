@@ -4,14 +4,16 @@ arm_cmd: send one command to motion.py and print its reply.
     python3 arm_cmd.py status
     python3 arm_cmd.py home
     python3 arm_cmd.py pick 1 3 egg      (from pocket 1 to pocket 3, object egg)
-    python3 arm_cmd.py jog lift 5        (move a joint by +5 arm degrees)
+    python3 arm_cmd.py jog lift 5        (lift +5 mm; base is in degrees)
     python3 arm_cmd.py teach 2           (save the current pose as pocket 2)
+    python3 arm_cmd.py calibrate         (seek both base stops, save the real travel)
     python3 arm_cmd.py pause | resume | stop | reset | reset-rehome
     python3 arm_cmd.py watch             (status 5x per second until Ctrl-C)
     python3 arm_cmd.py wait              (until motion is idle; exit 1 on FAULT)
 
 Teaching pockets: home, then jog each joint until the jaws sit in a pocket,
-then `teach N`. It's written into config/arm.json.
+then `teach N`. It's saved in config/taught.json on the Pi.
+Before homing, jogs are limited to small steps (unhomed_jog_max).
 """
 
 import json
@@ -69,7 +71,7 @@ def main(argv):
     if cmd == "PICK":
         msg.update({"from": argv[1], "to": argv[2], "label": argv[3]})
     elif cmd == "JOG":
-        msg.update({"joint": argv[1], "deg": float(argv[2])})
+        msg.update({"joint": argv[1], "amount": float(argv[2])})
     elif cmd == "TEACH":
         msg["pocket"] = argv[1]
     elif cmd == "RESET-REHOME":

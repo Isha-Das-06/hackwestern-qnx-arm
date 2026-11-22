@@ -8,8 +8,9 @@ It copies the real quirks that matter:
   - firmware "1.0": the encoder wraps every revolution (0-360) and 0xFD moves
     are ignored (use run() + stop()), no stall protection;
   - firmware "1.1": multi-turn encoder, exact pulse moves, moves_completed.
-  - an optional hard stop (`hard_min`), so homing against it works: the shaft
-    stops there and the shaft error grows, like a real blocked motor.
+  - optional hard stops (`hard_min`, `hard_max`), so homing and calibrating
+    against them works: the shaft stops there and the shaft error grows, like
+    a real blocked motor.
 Set SIM_JAM=<name> in the environment to make that motor jam after 1 s of
 movement (for testing the stall / progress checks).
 """
@@ -27,7 +28,7 @@ class FakeServo:
     PULSES_PER_REV = Servo42C.PULSES_PER_REV
 
     def __init__(self, port, addr=0xE0, name=None, firmware="1.1", hard_min=None,
-                 start_deg=0.0, speedup=1.0, **_):
+                 hard_max=None, start_deg=0.0, speedup=1.0, **_):
         self.name = name or port
         self.has_checksum = firmware != "1.0"
         self.moves_completed = 0
@@ -37,7 +38,7 @@ class FakeServo:
         self.commanded = start_deg    # where the driver wants the shaft
         self.vel = 0.0                # deg/s while running
         self.remaining = None         # deg left in a pulse move (V1.1), or None
-        self.hard_min = hard_min
+        self.hard_min, self.hard_max = hard_min, hard_max
         self.speedup = float(speedup or 1.0)
         self.jam = os.environ.get("SIM_JAM") == self.name
         self.moving_since = None
@@ -64,6 +65,8 @@ class FakeServo:
             self.actual = self.commanded
             if self.hard_min is not None and self.actual < self.hard_min:
                 self.actual = self.hard_min
+            if self.hard_max is not None and self.actual > self.hard_max:
+                self.actual = self.hard_max
         if self.vel == 0:
             self.moving_since = None
 
