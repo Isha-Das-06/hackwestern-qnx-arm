@@ -1,8 +1,9 @@
 %YAML:1.0
 ---
-# Target grip pressure window per object, in RAW grip-sensor units as read by
-# the Pico. PLACEHOLDERS: replace with the ranges from your grip tests.
-# Printed in every [pick] message (grip=[min,max]) and sent to the control task.
-egg: [ 80, 140 ]
-cup: [ 150, 260 ]
-block: [ 300, 600 ]
+# Grip window per object [target, max] in RAW FSR counts on the stronger jaw.
+# Shown only (the [pick] line and the console's grip column): the arm uses its
+# own copy, mks_servo/config/grip_profiles.json. Keep the two the same.
+# egg = Pill bottle (medium), cup = Squeeze bottle (firm), block = Pills (light).
+egg: [ 500, 800 ]
+cup: [ 700, 1000 ]
+block: [ 300, 550 ]

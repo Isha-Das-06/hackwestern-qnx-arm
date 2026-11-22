@@ -46,13 +46,23 @@ Status LED: solid means QNX is in control. Blinking means it's waiting for QNX, 
 | `grip_cmd.py` | Sends `open`, `grip egg`, `hold`, `relax`, `status` or `watch` to the loop |
 | `fake_pico.py` | Pretends to be the Pico on a pseudo-terminal, for testing without hardware |
 | `config/gripper.json` | Port, angles, step sizes, timeouts, UDP ports |
-| `config/grip_profiles.json` | Force `target` and `max` for each object. **These are placeholders: tune them, egg first** |
+| `config/grip_profiles.json` | Force `target` and `max` for each object, on the stronger jaw (hardcoded, see below) |
+
+Grip strength follows what vision classified the object as. The numbers are raw FSR counts on the **stronger** jaw:
+
+| Id (sent by vision) | Console name | Strength | `target` | `max` |
+|---|---|---|---|---|
+| `block` | Pills | light | 300 | 550 |
+| `egg` | Pill bottle | medium | 500 | 800 |
+| `cup` | Squeeze bottle | firm | 700 | 1000 |
+
+`config/grip.yml` (the vision side) shows the same windows in the console. Keep both files the same.
 
 Each 10 ms cycle does the following:
 1. Read the newest FSR frame.
 2. If either jaw is above `max`, back off 3° at once. While closing, it then tries again at ¼ speed; after 3 back-offs it gives up, holds, and reports `OVER_FORCE`.
-3. When `GRIP`: close 0.5° per cycle until the average force reaches `target`, then go to `GRIPPED` and hold. If the jaws close fully without reaching target, go to `NO_OBJECT`.
-4. When `GRIPPED` (and it really reached target): if force falls below 50% of target, set `slip` (motion decides whether to re-grip or abort).
+3. When `GRIP`: close 0.5° per cycle until the stronger jaw reaches `target`, then go to `GRIPPED` and hold. If the jaws close fully without reaching target, go to `NO_OBJECT`.
+4. When `GRIPPED` (and it really reached target): if the stronger jaw falls below 50% of target, set `slip` (motion decides whether to re-grip or abort).
 5. If no frame has arrived for 50 ms, go to `STALE` and hold the angle.
 
 Commands are one JSON object per UDP packet to `127.0.0.1:5601`, for example `{"cmd":"GRIP","object":"egg"}`. The reply is the status JSON. That same status goes to UDP `127.0.0.1:5602` at 20 Hz, which acts as the heartbeat and telemetry for the supervisor and dashboard. It includes loop jitter, worst case and missed deadlines.

@@ -7,7 +7,8 @@ Run at high priority so the force loop keeps its timing under load:
 
 What it does, every 10 ms (100 Hz, absolute deadlines so it never drifts):
   1. read the newest FSR frame from the Pico (UART4),
-  2. compare force with the active object's target / max (grip_profiles.json),
+  2. compare the stronger jaw's force with the active object's target / max
+     (grip_profiles.json),
   3. step the servo angle: close slowly until target, hold, back off at once
      if either jaw goes above max,
   4. set the servo's pulse width (Pi hardware PWM, GPIO19 / pin 35), clamped
@@ -213,7 +214,9 @@ class Gripper:
             if self.angle is None:
                 self.angle = float(cfg["attach_angle"])
             self.state = "HOLD"
-        force, peak = (fsr1 + fsr2) / 2.0, max(fsr1, fsr2)
+        # Every limit is on the stronger jaw: the jaw nearer the object reads
+        # 2-4x the other, so the average would hide how hard it is squeezed.
+        peak = max(fsr1, fsr2)
 
         # Force ceiling: checked every cycle in every state that squeezes.
         # Back off at once; while closing, try again at 1/4 speed, and after
@@ -245,7 +248,7 @@ class Gripper:
             if self.angle == cfg["open_angle"]:
                 self.state = "OPEN"
         elif self.state == "CLOSING":
-            if force >= self.profile["target"]:
+            if peak >= self.profile["target"]:
                 self.state, self.loaded = "GRIPPED", True
             elif self.angle == cfg["closed_angle"]:
                 self.state = "NO_OBJECT"
@@ -253,7 +256,7 @@ class Gripper:
                 step = cfg["close_step_deg"] / (4 if self.backoffs else 1)
                 self.angle = self._toward_closed(self.angle, step)
         elif self.state == "GRIPPED":
-            if self.loaded and force < cfg["slip_fraction"] * self.profile["target"]:
+            if self.loaded and peak < cfg["slip_fraction"] * self.profile["target"]:
                 self.slip = True     # motion reads this and stops / re-grips
 
     def hold_flag(self):
