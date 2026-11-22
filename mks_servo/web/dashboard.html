@@ -40,11 +40,19 @@
   <h1>Pick-and-place arm · QNX</h1>
   <span id="banner" class="warn">connecting…</span>
   <button class="stop" onclick="act('stop')">STOP</button>
+  <button onclick="act('start')">START</button>
   <button onclick="act('reset')">Reset</button>
   <button onclick="act('home')">Home</button>
   <button onclick="act('open')">Open gripper</button>
 </header>
 <main>
+  <section><h2>Safety</h2>
+    <div class="row"><span>e-stop</span><span id="s_estop"></span></div>
+    <div class="row"><span>actuator power</span><span id="s_power"></span></div>
+    <div class="row"><span>motion paused by</span><span id="s_pause"></span></div>
+    <div class="row"><span>hands in view</span><span id="s_hands"></span></div>
+    <div class="row"><span>pointing armed (START)</span><span id="s_select"></span></div>
+  </section>
   <section><h2>Motion</h2>
     <div class="big" id="m_state">–</div><div id="m_step" class="mono"></div>
     <div class="row"><span>joints</span><span id="m_joints" class="mono"></span></div>
@@ -68,7 +76,7 @@
   <section><h2>Real-time timing (lateness per cycle)</h2>
     <div class="row"><span>gripper 100 Hz, prio 30</span><span id="t_g" class="mono"></span></div>
     <div class="row"><span>motion 50 Hz, prio 30</span><span id="t_m" class="mono"></span></div>
-    <div class="row"><span>supervisor 20 Hz, prio 40</span><span id="t_s" class="mono"></span></div>
+    <div class="row"><span>supervisor 100 Hz, prio 40</span><span id="t_s" class="mono"></span></div>
     <div class="row"><span>vision (normal prio)</span><span id="t_v" class="mono"></span></div>
   </section>
   <section><h2>Processes</h2><div id="procs" class="mono"></div></section>
@@ -97,12 +105,17 @@ async function tick() {
     const s = await (await fetch("/state")).json();
     const b = $("banner");
     if (s.fault) { b.className = "bad"; b.textContent = "FAULT: " + s.fault; }
-    else if (s.vision_down) { b.className = "warn"; b.textContent = "PAUSED: vision restarting"; }
+    else if (s.paused && s.paused.length) { b.className = "warn"; b.textContent = "PAUSED: " + s.paused.join(", "); }
     else { b.className = "ok"; b.textContent = "OK" + (s.sim ? " (sim)" : ""); }
+    $("s_estop").textContent = s.estop ? "PRESSED" : "released";
+    $("s_power").textContent = s.power ? "ON" : "OFF";
+    $("s_pause").textContent = (s.paused && s.paused.length) ? s.paused.join(", ") : "–";
+    $("s_hands").textContent = s.hands ?? "–";
+    $("s_select").textContent = s.select_s > 0 ? `${s.select_s} s left` : "no (press START)";
     const m = s.motion || {}, g = s.gripper || {}, v = s.vision || {};
     $("m_state").textContent = m.state || "no heartbeat";
     $("m_step").textContent = m.step || "";
-    $("m_joints").textContent = m.joints ? Object.entries(m.joints).map(([k, x]) => `${k} ${x}°`).join("  ") : "";
+    $("m_joints").textContent = m.joints ? `lift ${m.joints.lift} mm  base ${m.joints.base}°` : "";
     $("m_picks").textContent = m.picks_done ?? "";
     $("m_last").textContent = m.last_result || "";
     $("g_state").textContent = (g.state || "no heartbeat") + (g.slip ? " · SLIP" : "");

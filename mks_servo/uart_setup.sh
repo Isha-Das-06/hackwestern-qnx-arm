@@ -16,12 +16,14 @@
 
 # Safety I/O. Outputs are driven LOW (actuator power off, fault LED off) before
 # anything else; only the supervisor switches them on. Inputs get pull-ups.
-#   GPIO22 (pin 15) out: actuator power enable (MOSFETs, 10k pull-down on their input)
+#   GPIO18 (pin 12) out: actuator power enable (MOSFETs, 10k pull-down on their
+#                        input). The supervisor holds it with a 100% PWM, so the
+#                        line drops if the supervisor dies.
 #   GPIO27 (pin 13) out: fault LED MOSFET
 #   GPIO17 (pin 11) in:  e-stop NC contact to GND: 0 = OK, 1 = pressed or wire broken
 #   GPIO23 (pin 16) in:  START button to GND: 0 = pressed
-gpio-bcm2711 set 22,27 pd
-gpio-bcm2711 set 22,27 op dl
+gpio-bcm2711 set 18,27 pd
+gpio-bcm2711 set 18,27 op dl
 gpio-bcm2711 set 17,23 ip pu
 echo "safety I/O ready: power+LED off, e-stop reads $(cat /dev/gpio/17 2>/dev/null), START reads $(cat /dev/gpio/23 2>/dev/null)"
 

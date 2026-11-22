@@ -1,19 +1,25 @@
 """
-supervisor: starts gripper_link, motion and vision, and watches them.
+supervisor: starts gripper_link, motion and vision, watches them, and owns the
+safety pins (e-stop, START button, actuator power, fault LED).
 
     on -p 40 python3 supervisor.py          real robot   (or ./start_robot.sh)
     python3 supervisor.py --sim             fake Pico, fake motors, fake vision
 Dashboard: http://<pi>:8090
 
 The rules (each one sentence, for the judges):
-  1. E-stop pressed (or its wire broken) -> FAULT. Hardware has already cut
-     motor power; software just notices and refuses to move until RESET.
-  2. gripper_link or motion dies or goes silent -> FAULT: stop and hold.
+  1. E-stop pressed (or its wire broken) -> actuator power off in the same
+     10 ms cycle, FAULT, and power stays off until the button is released and
+     RESET is pressed. The button's own contact also cuts power in hardware.
+  2. Actuator power is held on by this process; if the supervisor dies, QNX's
+     GPIO driver drops the line and power goes off.
+  3. gripper_link or motion dies or goes silent -> FAULT: stop and hold.
      If motion is the one that died, we send the stop to the drivers ourselves.
-  3. The Pico link goes stale -> FAULT (the Pico has frozen the servo itself).
-  4. Vision dies or goes silent -> PAUSE motion (hold), restart vision, and
-     RESUME when its heartbeat is back. Vision crashing is never a fault.
-  5. A FAULT is sticky: only the RESET button (or `arm_cmd.py reset`) clears it.
+  4. The Pico link goes stale -> FAULT (the Pico has frozen the servo itself).
+  5. Vision dies or goes silent, or a hand is in view -> PAUSE motion (hold);
+     RESUME once vision is back and no hand has been seen for hand_clear_s.
+     Vision crashing is never a fault; it is restarted.
+  6. Pointing only selects anything inside the window the START button opens.
+  7. A FAULT is sticky: only the RESET button (or `arm_cmd.py reset`) clears it.
 """
 
 import argparse
@@ -53,6 +59,82 @@ def udp_send(port, msg):
         s.close()
 
 
+class SafetyIO:
+    """The safety pins. Real GPIO on the Pi; plain files in /tmp with --sim.
+
+      power  GPIO18 (pin 12) actuator power enable (motor 12 V + servo MOSFETs),
+             held high by a 100% PWM from this process: if the process dies,
+             even by kill -9, QNX's GPIO driver stops the PWM and power drops.
+      led    GPIO27 (pin 13) fault LED: on = FAULT, blinking = paused.
+      estop  GPIO17 (pin 11) NC contact to GND: 0 = OK, 1 = pressed or wire
+             broken. Unreadable counts as pressed.
+      start  GPIO23 (pin 16) START button to GND: 0 = pressed.
+    Pull-ups and the boot-time "off" state are set by uart_setup.sh.
+    """
+
+    def __init__(self, cfg, sim):
+        self.sim = sim
+        self.power_on = self.led_on = None
+        io = cfg["io"]
+        if sim:
+            self.estop_path, self.start_path = cfg["estop_sim_path"], cfg["start_sim_path"]
+            for path, idle in ((self.estop_path, "0"), (self.start_path, "1")):
+                with open(path, "w") as f:
+                    f.write(idle)
+        else:
+            import rpi_gpio as G
+            G.setmode(G.BCM)
+            G.setup(io["power_pin"], G.OUT)
+            self.pwm = G.PWM(io["power_pin"], 1000, mode=G.PWM.MODE_MS)
+            self.pwm.start(0.0)
+            self.estop_path = f"/dev/gpio/{io['estop_pin']}"
+            self.start_path = f"/dev/gpio/{io['start_pin']}"
+            self.led_path = f"/dev/gpio/{io['led_pin']}"
+            for path, mode in ((self.estop_path, "in"), (self.start_path, "in"),
+                               (self.led_path, "out")):
+                self._write(path, mode)
+        self.set_power(False)
+        self.set_led(False)
+
+    @staticmethod
+    def _write(path, text):
+        try:
+            with open(path, "w") as f:
+                f.write(text)
+        except OSError:
+            pass
+
+    @staticmethod
+    def _read(path):
+        try:
+            with open(path) as f:
+                return f.read(4).strip()
+        except OSError:
+            return None
+
+    def estop_pressed(self):
+        return self._read(self.estop_path) != "0"
+
+    def start_pressed(self):
+        return self._read(self.start_path) == "0"
+
+    def set_power(self, on):
+        if on == self.power_on:
+            return
+        self.power_on = on
+        if self.sim:
+            self._write("/tmp/fake_power", "1" if on else "0")
+        else:
+            self.pwm.ChangeDutyCycle(100.0 if on else 0.0)
+
+    def set_led(self, on):
+        if on == self.led_on:
+            return
+        self.led_on = on
+        if not self.sim:
+            self._write(self.led_path, "on" if on else "off")
+
+
 class Proc:
     """One child process plus its heartbeat."""
 
@@ -62,6 +144,7 @@ class Proc:
         self.restarts = 0
         self.last_msg = None
         self.last_t = None
+        self.addr = None             # where its heartbeats come from (to talk back)
         self.started_t = 0.0
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("127.0.0.1", port))
@@ -88,13 +171,20 @@ class Proc:
     def poll_heartbeat(self):
         while True:
             try:
-                data = self.sock.recv(16384)
+                data, addr = self.sock.recvfrom(16384)
             except BlockingIOError:
                 return
             try:
                 self.last_msg = json.loads(data)
-                self.last_t = time.monotonic()
+                self.last_t, self.addr = time.monotonic(), addr
             except ValueError:
+                pass
+
+    def send_back(self, msg):
+        if self.addr:
+            try:
+                self.sock.sendto(json.dumps(msg).encode(), self.addr)
+            except OSError:
                 pass
 
     def silent_ms(self, now):
@@ -122,6 +212,12 @@ class Supervisor:
         self.events = []             # recent events for the dashboard
         self.vision_down = False
         self.estop = False
+        self.pause_reasons = []      # why motion is paused right now
+        self.hand_t = -1e9           # last time vision saw a hand
+        self.hands = 0
+        self.select_until = 0.0      # START window (monotonic time)
+        self.next_select_push = 0.0
+        self.start_reads = 0
         self.lock = threading.Lock()
         self.fake_pico = None
         ports = {"gripper": self.grip_cfg["telemetry_port"],
@@ -137,20 +233,12 @@ class Supervisor:
                     break
                 time.sleep(0.1)
             subs["{fake_pico_port}"] = open("/tmp/fake_pico_port").read().strip()
-            with open(cfg["estop_sim_path"], "w") as f:
-                f.write("0")
+        self.io = SafetyIO(cfg, sim)
         self.procs = {}
         for name, pc in cfg["procs"].items():
             use_sim = sim and not (name == "vision" and real_vision)
             cmd = [subs.get(a, a) for a in (pc["sim"] if use_sim else pc["cmd"])]
             self.procs[name] = Proc(name, pc, cmd, ports[name])
-        self.estop_path = cfg["estop_sim_path"] if sim else cfg["estop_path"]
-        if not sim:
-            try:                     # make sure the pin is an input
-                with open(self.estop_path, "w") as f:
-                    f.write("in")
-            except OSError:
-                pass
 
     # --------------------------------------------------------------- events
     def event(self, text):
@@ -166,7 +254,8 @@ class Supervisor:
             self.event(f"FAULT: {reason}")
             udp_send(self.arm["cmd_port"], {"cmd": "FAULT", "reason": reason})
             udp_send(self.grip_cfg["cmd_port"], {"cmd": "HOLD"})
-        if not self.procs["motion"].alive():
+        m = self.procs["motion"]
+        if m.p is not None and not m.alive():
             self.hold_motors_directly()
 
     def hold_motors_directly(self):
@@ -187,12 +276,28 @@ class Supervisor:
             except OSError as e:
                 self.event(f"could not reach {name} driver: {e}")
 
-    def read_estop(self):
-        try:
-            with open(self.estop_path) as f:
-                return f.read(4).strip() != "0"     # anything but 0 = pressed
-        except OSError:
-            return True                             # can't read it: fail safe
+    def power_up(self):
+        """Actuator power on (only with the e-stop released), then give the
+        SERVO42C drivers time to boot before anyone talks to them."""
+        if self.io.estop_pressed():
+            self.estop = True
+            self.raise_fault("E-STOP pressed")
+            return False
+        if not self.io.power_on:
+            self.io.set_power(True)
+            self.event("actuator power ON")
+            time.sleep(self.cfg["power_on_delay_s"])
+        return True
+
+    def open_select(self, source):
+        """START: pointing may select a move for select_window_s."""
+        if self.fault:
+            self.event(f"START ({source}) ignored: FAULT")
+            return "in FAULT: press RESET first"
+        self.select_until = time.monotonic() + self.cfg["select_window_s"]
+        self.next_select_push = 0.0
+        self.event(f"START ({source}): pointing armed for {self.cfg['select_window_s']} s")
+        return None
 
     # ---------------------------------------------------------------- loop
     def check(self, now):
@@ -200,10 +305,12 @@ class Supervisor:
             p.poll_heartbeat()
         g, m, v = self.procs["gripper"], self.procs["motion"], self.procs["vision"]
 
-        # 1. e-stop
-        pressed = self.read_estop()
+        # 1. e-stop: power off in this same cycle, then latch a FAULT.
+        pressed = self.io.estop_pressed()
+        if pressed:
+            self.io.set_power(False)
         if pressed and not self.estop:
-            self.event("E-STOP pressed")
+            self.event("E-STOP pressed: actuator power OFF")
             self.raise_fault("E-STOP pressed")
         elif not pressed and self.estop:
             self.event("E-STOP released (press RESET to continue)")
@@ -221,17 +328,22 @@ class Supervisor:
         if gs.get("state") == "STALE":
             self.raise_fault("Pico link stale (servo frozen by the Pico)")
 
-        # 4. vision: pause, restart, resume
+        # 4. vision down or a hand in view: pause; resume once both are clear.
         vc = v.cfg
         # "Back" only once the new vision has really sent a heartbeat.
         down = not v.alive() or v.last_t is None or v.silent_ms(now) > vc["heartbeat_ms"]
-        if down and not self.vision_down:
-            self.event("vision down: PAUSE motion (holding)")
+        self.hands = 0 if down else int((v.last_msg or {}).get("hands", 0))
+        if self.hands:
+            self.hand_t = now
+        hand = now - self.hand_t < self.cfg["hand_clear_s"]
+        reasons = [r for r, on in (("vision down", down), ("hand in view", hand)) if on]
+        if reasons and not self.pause_reasons:
+            self.event(f"PAUSE motion ({', '.join(reasons)}): holding")
             udp_send(self.arm["cmd_port"], {"cmd": "PAUSE"})
-        if not down and self.vision_down:
-            self.event("vision back: RESUME motion")
+        elif not reasons and self.pause_reasons:
+            self.event("clear: RESUME motion")
             udp_send(self.arm["cmd_port"], {"cmd": "RESUME"})
-        self.vision_down = down
+        self.pause_reasons, self.vision_down = reasons, down
         if not v.alive() or v.silent(now, vc["restart_after_silent_s"] * 1000):
             if v.alive():
                 v.kill()
@@ -245,9 +357,27 @@ class Supervisor:
                 self.event(f"restarting vision (#{v.restarts})")
                 v.start()
 
+        # 5. START button (2 reads in a row = pressed) opens the pointing window;
+        #    vision hears how long is left, 5 times a second.
+        if self.io.start_pressed():
+            self.start_reads += 1
+            if self.start_reads == 2:
+                self.open_select("button")
+        else:
+            self.start_reads = 0
+        if self.fault:
+            self.select_until = 0.0
+        if now >= self.next_select_push:
+            self.next_select_push = now + 0.2
+            v.send_back({"select_s": round(max(0.0, self.select_until - now), 1)})
+
+        # 6. Fault LED: on = FAULT, blinking = paused, off = running normally.
+        self.io.set_led(bool(self.fault) or (bool(self.pause_reasons) and int(now * 2) % 2 == 0))
+
     def reset(self):
-        """Dashboard RESET: restart any dead process, then clear the fault."""
-        if self.read_estop():
+        """Dashboard RESET: restart any dead process, power back up after an
+        e-stop, then clear the fault."""
+        if self.io.estop_pressed():
             return "e-stop is still pressed"
         restarted = []
         for p in (self.procs["gripper"], self.procs["motion"]):   # vision restarts itself
@@ -256,16 +386,17 @@ class Supervisor:
                 self.event(f"restarting {p.name}")
                 p.start()
                 restarted.append(p.name)
+        was_estop = self.fault is not None and "E-STOP" in self.fault
+        self.power_up()
         if restarted:
             time.sleep(1.5)
-        was_estop = self.fault is not None and "E-STOP" in self.fault
         self.fault = None
         self._held_directly = False
-        if "motion" in restarted:        # a fresh motion has no fault; it homes itself
-            self.event("RESET (motion restarted: it re-homes; park the base on its mark)")
+        if "motion" in restarted:        # a fresh motion has no fault
+            self.event("RESET (motion restarted: home it again)")
             return None
         r = udp_request(self.arm["cmd_port"], {"cmd": "RESET", "rehome": was_estop})
-        self.event("RESET" + (" (re-homing after e-stop)" if was_estop else ""))
+        self.event("RESET" + (" (drivers re-initialised after e-stop)" if was_estop else ""))
         return None if r and r.get("ok") else f"motion: {r and r.get('error')}"
 
     def state(self, timer):
@@ -273,6 +404,8 @@ class Supervisor:
         with self.lock:
             events = list(self.events)
         return {"t": time.time(), "fault": self.fault, "estop": self.estop,
+                "power": self.io.power_on, "paused": self.pause_reasons,
+                "hands": self.hands, "select_s": round(max(0.0, self.select_until - now), 1),
                 "vision_down": self.vision_down, "sim": self.sim, "events": events,
                 "timing": timer.stats(),
                 "procs": {n: p.info(now) for n, p in self.procs.items()},
@@ -319,6 +452,8 @@ def make_web(sup, timer):
                 err = sup.reset()
             elif act == "stop":
                 sup.raise_fault("STOP button")
+            elif act == "start":
+                err = sup.open_select("dashboard")
             elif act == "home":
                 r = udp_request(sup.arm["cmd_port"], {"cmd": "HOME"})
                 err = None if r and r.get("ok") else (r and r.get("error")) or "no reply"
@@ -341,7 +476,10 @@ def main():
     args = ap.parse_args()
     cfg = load_json("supervisor.json")
     sup = Supervisor(cfg, args.sim, args.real_vision)
+    # Gripper first, then actuator power (drivers need ~2 s to boot), then the rest.
     for name in ("gripper", "motion", "vision"):
+        if name == "motion":
+            sup.power_up()
         sup.procs[name].start()
         sup.event(f"started {name}: {' '.join(sup.procs[name].cmd)}")
     time.sleep(1.5)                  # let them open ports before we judge heartbeats
@@ -358,7 +496,7 @@ def main():
             if timer.win_n >= cfg["loop_hz"]:
                 timer.roll()
     except KeyboardInterrupt:
-        sup.event("shutting down (motors stay enabled and holding)")
+        sup.event("shutting down: motors stopped; actuator power goes off with this process")
         sup.shutdown()
 
 

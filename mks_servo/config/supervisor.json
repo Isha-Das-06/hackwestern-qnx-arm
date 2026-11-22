@@ -1,12 +1,12 @@
 {
-  "_comment": "Supervisor: starts the other three processes and watches them. {sim} lines are used with --sim (fake Pico, fake motors, fake vision).",
+  "_comment": "Supervisor: starts the other three processes, watches them, and owns the safety pins. {sim} lines are used with --sim (fake Pico, fake motors, fake vision).",
 
   "procs": {
     "gripper": {"cmd": ["on", "-p", "30", "python3", "gripper_link.py", "--quiet"],
                 "sim":  ["on", "-p", "30", "python3", "gripper_link.py", "--quiet", "--port", "{fake_pico_port}"],
                 "restart": false, "heartbeat_ms": 250},
     "motion":  {"cmd": ["on", "-p", "30", "python3", "motion.py"],
-                "sim":  ["on", "-p", "30", "python3", "motion.py", "--sim", "4"],
+                "sim":  ["on", "-p", "30", "python3", "motion.py", "--sim", "2"],
                 "restart": false, "heartbeat_ms": 500},
     "vision":  {"cmd": ["on", "-p", "10", "sh", "/data/home/qnxuser/pickvision/run_pi.sh", "--arm"],
                 "sim":  ["on", "-p", "10", "python3", "fake_vision.py"],
@@ -14,10 +14,16 @@
                 "restart_delay_s": 2.0}
   },
 
-  "vision_port": 5622,
-  "estop_path": "/dev/gpio/17",
+  "_io": "BCM GPIO numbers. power = actuator power enable (pin 12), held by a 100% PWM so it drops if the supervisor dies. led = fault LED MOSFET (pin 13). estop = NC contact to GND (pin 11): 0 = OK, 1 = pressed or wire broken. start = green button to GND (pin 16): 0 = pressed.",
+  "io": {"power_pin": 18, "led_pin": 27, "estop_pin": 17, "start_pin": 23},
   "estop_sim_path": "/tmp/fake_estop",
-  "_estop": "NC button contact between GPIO17 (pin 11) and GND (pin 9), pull-up on: 0 = OK, 1 = pressed OR wire broken (fails safe).",
+  "start_sim_path": "/tmp/fake_start",
+  "power_on_delay_s": 2.0,
+
+  "select_window_s": 15,
+  "hand_clear_s": 1.0,
+
+  "vision_port": 5622,
   "web_port": 8090,
-  "loop_hz": 20
+  "loop_hz": 100
 }
