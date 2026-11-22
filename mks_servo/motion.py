@@ -386,7 +386,9 @@ class Motion:
                 # stopped, for block_s. Turning freely it lags 2-8 motor deg. Climbing
                 # through a joint's known tight band (the lift's printed guide, 36-52
                 # mm) it can stick and break free, so there it gets tight_band_block_s;
-                # going down (where it could press on something) it keeps block_s.
+                # climbing anywhere else (heavier with an object in the jaws) it gets
+                # climb_block_s; going down (where it could press on something) and
+                # every other joint keep block_s.
                 now = time.monotonic()
                 for name, a in active.items():
                     j = self.joints[name]
@@ -416,7 +418,9 @@ class Motion:
                     climbing = a["d"] > 0                      # band only sticks going up
                     in_band = band and climbing and band[0] <= (pos - j.zero) / j.ratio <= band[1]
                     a["in_band"] = in_band
-                    hold_s = j.cfg["tight_band_block_s"] if in_band else c["block_s"]
+                    hold_s = (j.cfg["tight_band_block_s"] if in_band
+                              else j.cfg.get("climb_block_s", c["block_s"]) if climbing
+                              else c["block_s"])
                     if a["over_since"] is not None and now - a["over_since"] >= hold_s:
                         for other in active:
                             self.joints[other].m.stop()
