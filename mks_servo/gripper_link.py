@@ -263,7 +263,15 @@ class Gripper:
             if peak >= self.profile["target"]:
                 self.state, self.loaded = "GRIPPED", True
             elif self.angle == cfg["closed_angle"]:
-                self.state = "NO_OBJECT"
+                # Closed all the way without reaching target. If the jaws clearly
+                # touched something (idle reads ~5-20), the object is in the jaws
+                # and the squeeze is just landing off the FSR pad (seen Nov 22:
+                # peaks 78-99 on one jaw): hold it at closed_angle and carry it.
+                # loaded stays False, so the slip check (which needs target) is off.
+                if self.peak and self.peak["fsr"] >= cfg.get("contact_force", 50):
+                    self.state = "GRIPPED"
+                else:
+                    self.state = "NO_OBJECT"
             else:
                 step = cfg["close_step_deg"] / (4 if self.backoffs else 1)
                 self.angle = self._toward_closed(self.angle, step)

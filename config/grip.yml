@@ -1,9 +1,8 @@
 %YAML:1.0
 ---
 # Grip window per object [target, max] in RAW FSR counts on the stronger jaw.
-# Shown only (the [pick] line and the console's grip column): the arm uses its
-# own copy, mks_servo/config/grip_profiles.json. Keep the two the same.
-# egg = Pill bottle (medium), cup = Squeeze bottle (firm), block = Pills (light).
-egg: [ 500, 800 ]
-cup: [ 700, 1000 ]
-block: [ 300, 550 ]
+# Tuned Nov 22 from Pi grip logs (successful peaks ~15-27). Keep in sync with
+# mks_servo/config/grip_profiles.json. egg=Pill bottle, cup=Squeeze bottle, block=Pills.
+egg: [ 25, 150 ]
+cup: [ 20, 120 ]
+block: [ 14, 100 ]

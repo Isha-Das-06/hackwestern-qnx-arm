@@ -3,7 +3,7 @@
   "_calibrate": "Measured Nov 22 (after re-seating the horn): 15 deg = fully open (63 mm, quiet), 60 deg = 40 mm, closed end 26.5 mm at ~86.5 deg (servo buzzes there): 0.51 mm of opening per servo degree, bigger angle = closed. angle_min/angle_max are the hard clamp on every pulse sent, just inside the ends; open_angle/closed_angle a few degrees inside those. attach_angle (where the servo jumps when gripper_link starts) is mid-travel. Re-check with `grip_cmd.py angle N` if the horn is ever moved.",
   "port": "/dev/ser4",
   "loop_hz": 100,
-  "stale_ms": 50,
+  "stale_ms": 200,
 
   "_servo": "MZ996 on Pi hardware PWM: GPIO19 (pin 35) = PWM0_1, 50 Hz, pulse_min_us..pulse_max_us = 0..180 deg. Powered from the Pi's 5 V pin.",
   "servo_pin": 19,
@@ -15,7 +15,9 @@
 
   "attach_angle": 50,
   "open_angle": 20,
-  "closed_angle": 82,
+  "closed_angle": 84,
+  "_contact": "contact_force: if the jaws close all the way to closed_angle and the stronger FSR peaked at >= this, count it as GRIPPED. 0 = always (Nov 22: the squeeze bottle is held firmly at 84 deg while both FSRs read idle ~8; vision already checked the object is there).",
+  "contact_force": 12,
   "open_step_deg": 2.0,
   "close_step_deg": 0.5,
   "backoff_deg": 3.0,

@@ -1,7 +1,7 @@
 {
-  "_comment": "Per-object grip force in raw FSR counts (3.3k divider), all on the STRONGER jaw (max of the two sensors). GRIP closes until the stronger jaw reaches 'target'; if EITHER jaw goes above 'max' the jaws back off at once. Strengths (hardcoded for now): 300 light, 500 medium, 700 firm. Measured Nov 22: the jaw nearer the object reads 2-4x the other; force rises ~70-100 counts per servo degree after contact, so keep >= 250 counts between target and max.",
-  "_names": "Ids stay egg/cup/block (vision sends these); the console shows egg = Pill bottle, cup = Squeeze bottle, block = Pills.",
-  "egg":   {"target": 500, "max": 800},
-  "cup":   {"target": 700, "max": 1000},
-  "block": {"target": 300, "max": 550}
+  "_comment": "Per-object grip force in raw FSR counts on the STRONGER jaw. Tuned Nov 22 from Pi logs: successful grips peaked ~15-27; glancing contacts ~78-99; idle ~6-10. Targets sit just above idle so a real squeeze stops early; max stays above glancing peaks so we don't OVER_FORCE. If jaws reach closed_angle first, contact_force in gripper.json still accepts the grip.",
+  "_names": "egg = Pill bottle, cup = Squeeze bottle, block = Pills.",
+  "egg":   {"target": 25, "max": 150},
+  "cup":   {"target": 20, "max": 120},
+  "block": {"target": 14, "max": 100}
 }
