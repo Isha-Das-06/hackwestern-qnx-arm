@@ -110,11 +110,13 @@ async function tick() {
     if (s.fault) { b.className = "bad"; b.textContent = "FAULT: " + s.fault; }
     else if (s.paused && s.paused.length) { b.className = "warn"; b.textContent = "PAUSED: " + s.paused.join(", "); }
     else { b.className = "ok"; b.textContent = "OK" + (s.sim ? " (sim)" : ""); }
-    $("s_estop").textContent = s.estop ? "PRESSED" : "released";
+    $("s_estop").textContent = s.estop_connected === false ? "NOT CONNECTED (use STOP above)"
+      : s.estop ? "PRESSED" : "released";
     $("s_power").textContent = s.power ? "ON" : "OFF";
     $("s_pause").textContent = (s.paused && s.paused.length) ? s.paused.join(", ") : "–";
     $("s_hands").textContent = s.hands ?? "–";
-    $("s_select").textContent = s.select_s > 0 ? `${s.select_s} s left` : "no (press START)";
+    $("s_select").textContent = s.select_s > 0 ? `${s.select_s} s left`
+      : s.start_connected === false ? "no (press START here or in the console)" : "no (press START)";
     const m = s.motion || {}, g = s.gripper || {}, v = s.vision || {};
     $("m_state").textContent = m.state || "no heartbeat";
     $("m_step").textContent = m.step || "";

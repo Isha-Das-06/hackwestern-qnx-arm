@@ -19,8 +19,12 @@ cd ~/mks_servo
 ./start_robot.sh          # real robot (needs /dev/ser3, ser4 and ser5, see GRIPPER.md)
 ./start_robot.sh --sim    # fake Pico, fake motors, fake vision: rehearse anywhere
 ./start_robot.sh --sim --real-vision   # real camera app, fake arm
+./start_robot.sh --no-estop --no-start-button   # real robot, buttons not wired yet
 ./stop_robot.sh
 ```
+
+- `--no-estop`: no e-stop is wired. Its pulled-up pin would read "pressed" and keep the power off, so the supervisor ignores it. The dashboard shows the e-stop as NOT CONNECTED, and the only stops are the dashboard STOP button and pulling power. Use this only for bench testing.
+- `--no-start-button`: no START button is wired. The supervisor ignores that pin, and START comes from the console's START button or the dashboard's.
 
 The dashboard is at `http://<pi-ip>:8090`. It has STOP, Reset, Home and Open gripper buttons, and shows live force bars, every process's loop timing, and the event log. Logs are in `/tmp/robot/*.log`.
 

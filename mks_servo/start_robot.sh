@@ -1,12 +1,16 @@
 #!/bin/sh
 # One command to start the whole robot:   ./start_robot.sh        (real hardware)
 #                                          ./start_robot.sh --sim  (no hardware)
+# Buttons not wired yet:  ./start_robot.sh --no-estop --no-start-button
+#   (either one alone works too; START then comes from the console or dashboard)
 # Stop it:  ./stop_robot.sh      Dashboard: http://<pi-ip>:8090
 # Logs: /tmp/robot/supervisor.log (and gripper.log, motion.log, vision.log)
 cd "$(dirname "$0")" || exit 1
 mkdir -p /tmp/robot
 
-if [ "$1" != "--sim" ]; then
+SIM=0
+for a in "$@"; do [ "$a" = "--sim" ] && SIM=1; done
+if [ "$SIM" = 0 ]; then
     for n in 3 4 5; do
         [ -e /dev/ser$n ] || { echo "/dev/ser$n missing: run  su -c 'sh uart_setup.sh'  (or add it to post_startup.sh)"; exit 1; }
     done

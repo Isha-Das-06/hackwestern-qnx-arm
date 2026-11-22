@@ -72,10 +72,14 @@ class SafetyIO:
              broken. Unreadable counts as pressed.
       start  GPIO23 (pin 16) START button to GND: 0 = pressed.
     Pull-ups and the boot-time "off" state are set by uart_setup.sh.
+    With no e-stop wired the pulled-up pin reads "pressed", so --no-estop ignores it
+    (never released, never pressed); --no-start-button ignores the START pin
+    (START then comes only from the console or the dashboard).
     """
 
-    def __init__(self, cfg, sim):
+    def __init__(self, cfg, sim, estop_connected=True, start_connected=True):
         self.sim = sim
+        self.estop_connected, self.start_connected = estop_connected, start_connected
         self.power_on = self.led_on = None
         io = cfg["io"]
         if sim:
@@ -115,9 +119,13 @@ class SafetyIO:
             return None
 
     def estop_pressed(self):
+        if not self.estop_connected:
+            return False
         return self._read(self.estop_path) != "0"
 
     def start_pressed(self):
+        if not self.start_connected:
+            return False
         return self._read(self.start_path) == "0"
 
     def set_power(self, on):
@@ -206,7 +214,7 @@ class Proc:
 
 
 class Supervisor:
-    def __init__(self, cfg, sim, real_vision=False):
+    def __init__(self, cfg, sim, real_vision=False, estop_connected=True, start_connected=True):
         self.cfg, self.sim = cfg, sim
         self.arm = load_json("arm.json")
         self.grip_cfg = load_json("gripper.json")
@@ -237,7 +245,7 @@ class Supervisor:
                     break
                 time.sleep(0.1)
             subs["{fake_pico_port}"] = open("/tmp/fake_pico_port").read().strip()
-        self.io = SafetyIO(cfg, sim)
+        self.io = SafetyIO(cfg, sim, estop_connected, start_connected)
         self.procs = {}
         for name, pc in cfg["procs"].items():
             use_sim = sim and not (name == "vision" and real_vision)
@@ -421,6 +429,8 @@ class Supervisor:
         with self.lock:
             events = list(self.events)
         return {"t": time.time(), "fault": self.fault, "estop": self.estop,
+                "estop_connected": self.io.estop_connected,
+                "start_connected": self.io.start_connected,
                 "power": self.io.power_on, "paused": self.pause_reasons,
                 "hands": self.hands, "select_s": round(max(0.0, self.select_until - now), 1),
                 "vision_down": self.vision_down, "sim": self.sim, "events": events,
@@ -490,9 +500,20 @@ def main():
     ap.add_argument("--sim", action="store_true", help="fake Pico, motors and vision")
     ap.add_argument("--real-vision", action="store_true",
                     help="with --sim: use the real camera app (rehearse before the arm is built)")
+    ap.add_argument("--no-estop", action="store_true",
+                    help="no e-stop wired: ignore its pin (otherwise the pulled-up pin reads "
+                         "'pressed' and power never comes on). Use the dashboard STOP instead")
+    ap.add_argument("--no-start-button", action="store_true",
+                    help="no START button wired: ignore its pin; START from the console or dashboard")
     args = ap.parse_args()
     cfg = load_json("supervisor.json")
-    sup = Supervisor(cfg, args.sim, args.real_vision)
+    sup = Supervisor(cfg, args.sim, args.real_vision,
+                     estop_connected=not args.no_estop, start_connected=not args.no_start_button)
+    if args.no_estop:
+        sup.event("WARNING: e-stop NOT connected (--no-estop): only the dashboard STOP "
+                  "and pulling power stop the arm")
+    if args.no_start_button:
+        sup.event("START button not connected (--no-start-button): use the console or dashboard START")
     # Gripper first, then actuator power (drivers need ~2 s to boot), then the rest.
     for name in ("gripper", "motion", "vision"):
         if name == "motion":
