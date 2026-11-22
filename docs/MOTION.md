@@ -40,7 +40,11 @@ Telemetry and heartbeat: status JSON is sent to UDP 5612 at 10 Hz, including the
 ## Homing
 
 - **base:** `marked_zero`. Before starting motion, park the arm on the zero mark (`homing.marked_pose`).
-- **lift:** `marked_zero`, or `hard_stop`, which drives down slowly with Surya's `run_until_blocked` until the shaft is blocked, then backs off 2°.
+- **lift:** `hard_stop`. It drives **up** slowly with Surya's `run_until_blocked` until the shaft is blocked at the top stop (70 mm), then backs off 2°.
+  - The printed lift guide has a tight spot that can pass for the stop. If homing took that spot for the top, every height would be too low and the base would turn through the bottles.
+  - So the lift then backs down 5 mm (`confirm_backoff`) and seeks again. The real stop is met again within 2 mm. A tight spot gets pushed through, and homing keeps going, up to 3 checks, then faults.
+  - The log shows `lift stop confirmed` or `that was a tight spot`.
+- **Heights:** `travel_lift` and `home_pose.lift` are 64 mm, near the 68 mm soft limit. The base only turns at travel height, so the jaws pass as high as possible over the bottles in the other docks.
 
 ## Setting up on the real arm
 

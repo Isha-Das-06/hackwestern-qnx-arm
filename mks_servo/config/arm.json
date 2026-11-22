@@ -14,20 +14,21 @@
              "lag_limit_motor_deg": 10.0, "approach": 1, "approach_overshoot": 3.0}
   },
 
-  "_homing": "hard_stop = drive slowly into the stop until the motor lags (Surya's seek), then that spot is stop_at. marked_zero = the arm is parked at marked_at when motion starts. The lift has no clear spot to go all the way down (the jaws always meet a platform), so it seeks UP to its solid top stop, nominally 70 mm (CAD stroke). The 3D-printed lift guide is tight 40-48 mm above pick height: the climbing lag reaches its 18 deg ceiling there, but the shaft keeps moving. It can also stick there for a moment and break free. So 'blocked' (both the seek and the obstruction check) means lag over the limit AND the shaft nearly stopped (under stuck_fraction of its commanded speed over stuck_window_s), for block_s; inside the lift's tight_band, for tight_band_block_s (the seek uses seek_stuck_s). Both drivers' lag reading (0x39) saturates at 18.0 deg, so every limit must stay below that. The base seeks its clockwise stop, which sits at -88.3 deg in the CAD frame (dock A centred at -51.0 when the stop was called -79.3); measured stop-to-stop range 158.6 deg. calibrate_both_ends re-measures the base range (CALIBRATE).",
+  "_homing": "hard_stop = drive slowly into the stop until the motor lags (Surya's seek), then that spot is stop_at. marked_zero = the arm is parked at marked_at when motion starts. The lift has no clear spot to go all the way down (the jaws always meet a platform), so it seeks UP to its solid top stop, nominally 70 mm (CAD stroke). The 3D-printed lift guide is tight 40-48 mm above pick height: the climbing lag reaches its 18 deg ceiling there, but the shaft keeps moving. It can also stick there for a moment and break free. So 'blocked' (both the seek and the obstruction check) means lag over the limit AND the shaft nearly stopped (under stuck_fraction of its commanded speed over stuck_window_s), for block_s; inside the lift's tight_band, for tight_band_block_s (the seek uses seek_stuck_s). Both drivers' lag reading (0x39) saturates at 18.0 deg, so every limit must stay below that. The base seeks its clockwise stop, which sits at -88.3 deg in the CAD frame (dock A centred at -51.0 when the stop was called -79.3); measured stop-to-stop range 158.6 deg. calibrate_both_ends re-measures the base range (CALIBRATE). confirm_backoff: a stick in the tight band could pass for the top stop (then every height is off by the gap and home sits low), so after the first contact the lift backs down confirm_backoff mm and seeks again; the real stop is met again within confirm_tol mm, a tight spot gets pushed through (up to confirm_tries times).",
   "homing": {
     "seek_speed": 8,
     "lift": {"mode": "hard_stop", "toward": 1, "stop_at": 70.0,
-             "seek_error_deg": 10.0, "seek_stuck_s": 2.0, "seek_max_motor_deg": 380.0},
+             "seek_error_deg": 10.0, "seek_stuck_s": 2.0, "seek_max_motor_deg": 380.0,
+             "confirm_backoff": 5.0, "confirm_tries": 3, "confirm_tol": 2.0},
     "base": {"mode": "hard_stop", "marked_at": 0.0, "toward": -1, "stop_at": -88.3,
              "seek_error_deg": 10.0, "seek_max_motor_deg": 220.0, "calibrate_both_ends": true}
   },
   "auto_home": false,
   "unhomed_jog_max": 5.0,
 
-  "_poses": "Pockets default to the CAD docks (145 mm radius): A -60, B -20, OUT +20, C +60 deg; lift heights are placeholders until taught. Vision box N = pocket N; TEACH overrides these in taught.json. travel_lift must clear the dock platforms while the base turns (motion refuses to turn the base below it). home_pose parks the arm at the model's built-in home, the clockwise end (CAD park index -82 deg), out of the camera's view of the docks.",
-  "home_pose": {"lift": 50.0, "base": -82.0},
-  "travel_lift": 50.0,
+  "_poses": "Pockets default to the CAD docks (145 mm radius): A -60, B -20, OUT +20, C +60 deg; lift heights are placeholders until taught. Vision box N = pocket N; TEACH overrides these in taught.json. travel_lift must clear the dock platforms AND the objects standing in the other docks while the base turns (motion refuses to turn the base below it): 64 mm, near the top of the 68 mm soft limit, since the bottles are tall. home_pose parks the arm at the model's built-in home, the clockwise end (CAD park index -82 deg), out of the camera's view of the docks.",
+  "home_pose": {"lift": 64.0, "base": -82.0},
+  "travel_lift": 64.0,
   "pockets": {
     "1": {"lift": 10.0, "base": -60.0},
     "2": {"lift": 10.0, "base": -20.0},

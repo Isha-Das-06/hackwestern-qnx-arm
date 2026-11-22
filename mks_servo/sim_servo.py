@@ -13,6 +13,8 @@ It copies the real quirks that matter:
     a real blocked motor.
 Set SIM_JAM=<name> in the environment to make that motor jam after 1 s of
 movement (for testing the stall / progress checks).
+Set SIM_STICK=<name>:<motor deg> to make that shaft stick once at that spot while
+turning the positive way (like the lift's tight guide), until the next move starts.
 """
 
 import os
@@ -41,6 +43,9 @@ class FakeServo:
         self.hard_min, self.hard_max = hard_min, hard_max
         self.speedup = float(speedup or 1.0)
         self.jam = os.environ.get("SIM_JAM") == self.name
+        stick = os.environ.get("SIM_STICK", "").split(":")
+        self.stick_at = float(stick[1]) if len(stick) == 2 and stick[0] == self.name else None
+        self.sticking = False
         self.moving_since = None
         self.t = time.monotonic()
         self.lock = threading.Lock()
@@ -61,6 +66,9 @@ class FakeServo:
                 self.remaining -= abs(step)
         self.commanded += step
         jammed = self.jam and self.moving_since and now - self.moving_since > 1.0
+        if self.stick_at is not None and step > 0 and self.actual <= self.stick_at < self.commanded:
+            self.actual, self.sticking = self.stick_at, True
+            jammed = True
         if not jammed:
             self.actual = self.commanded
             if self.hard_min is not None and self.actual < self.hard_min:
@@ -72,6 +80,9 @@ class FakeServo:
 
     def _start(self, direction, speed, deg=None):
         self._tick()
+        if self.sticking:                 # a new move frees it, once
+            self.stick_at, self.sticking = None, False
+            self.commanded = self.actual
         sign = 1 if direction == 1 else -1          # 1 = CCW = positive here
         self.vel = sign * speed * DEG_PER_S_PER_SPEED * self.speedup
         self.remaining = deg

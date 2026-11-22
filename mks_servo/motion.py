@@ -511,11 +511,44 @@ class Motion:
         j.reset_tracker()
         return turned
 
+    def confirm_stop(self, j, hj):
+        """A tight spot (the lift's printed guide) can pass for the stop, and then
+        every height is off by the gap. Back away a run-up and seek again: the real
+        stop is met again at the same spot, a tight spot is pushed through.
+        V1.1 only (exact pulse moves)."""
+        back = hj.get("confirm_backoff")
+        if not back or not j.m.has_checksum:
+            return
+        speed = self.cfg["homing"]["seek_speed"]
+        for k in range(hj.get("confirm_tries", 3)):
+            self.step = f"{j.name}: checking that was its stop ({k + 1})"
+            a = j.motor_deg()
+            deg = back * j.ratio
+            pulses = int(deg / 360.0 * j.m.PULSES_PER_REV)
+            p0 = j.m.pulses_received()
+            j.m.move(j.direction(-hj["toward"]), speed, pulses)
+            deadline = time.monotonic() + deg / (speed * self.cfg["deg_per_s_per_speed"]) + 2.0
+            while abs(j.m.pulses_received() - p0) < pulses - 2 and time.monotonic() < deadline:
+                self.checkpoint()
+                time.sleep(0.03)
+            time.sleep(0.2)
+            away = abs(j.motor_deg() - a)
+            turned = self.seek(j, hj["toward"])
+            extra = (turned - away - SEEK_BACKOFF_DEG) / j.ratio
+            if extra < hj.get("confirm_tol", 2.0):
+                print(f"motion: {j.name} stop confirmed (met again {extra:+.1f} {j.unit} "
+                      f"from the first contact)", flush=True)
+                return
+            print(f"motion: {j.name}: that was a tight spot, not the stop: pushed "
+                  f"{extra:.1f} {j.unit} further", flush=True)
+        raise Fault(f"{j.name}: no repeatable stop while homing (kept going further)")
+
     def home_joint(self, j):
         hj = self.cfg["homing"][j.name]
         if hj["mode"] == "hard_stop":
             self.step = f"{j.name}: seeking its stop"
             self.seek(j, hj["toward"])
+            self.confirm_stop(j, hj)
             here = hj["stop_at"] - hj["toward"] * SEEK_BACKOFF_DEG / j.ratio
         else:
             here = hj["marked_at"]          # the arm was parked on its mark
