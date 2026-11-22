@@ -4,6 +4,8 @@ const $ = id => document.getElementById(id);
 const cam = $("cam"), cv = $("overlay"), frameEl = $("frame");
 // what the operator sees; the ids (egg/cup/block) stay the same inside the app and to the arm
 const OBJ = { egg: "Pill bottle", cup: "Squeeze bottle", block: "Pills", empty: "Empty", unknown: "Unknown" };
+// grip strength the arm uses for each (mks_servo/config/grip_profiles.json): hardcoded for now
+const GRIP = { egg: "Medium", cup: "Firm", block: "Light" };
 const KNOWN = ["egg", "cup", "block"];
 const TEACH_GOAL = 5;
 const HAND = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
@@ -18,6 +20,7 @@ const cmd = (c, extra = "") => send(`/cmd?c=${c}${extra}`);
 const upper = (s) => s ? s[0].toUpperCase() + s.slice(1) : s;
 const objName = (id) => OBJ[id] || upper(id);              // "Pill bottle"
 const objLower = (id) => objName(id).toLowerCase();         // "pill bottle" (inside a sentence)
+const gripText = (id) => GRIP[id] ? `${GRIP[id].toLowerCase()} grip` : "";  // "medium grip"
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 // Pi times -> this computer's clock (the Pi's clock can be wrong after a reboot without internet)
 const clock = (epoch) => new Date(S && S.sys && S.sys.now ? Date.now() - (S.sys.now - epoch) * 1000 : epoch * 1000)
@@ -86,7 +89,8 @@ function status(sel, setup, n, robot) {
     case "CLASSIFYING": return first ? ["from", "1", `Looking at box ${f}…`, "Keep your hand out of view for a moment."]
                                      : ["to", "2", `Checking box ${t} is empty…`, "Keep your hand out of view for a moment."];
     case "CHOOSE_DEST": return ["to", "2", `${upper(obj)} found. Point where it should go`, "Hold your finger over an empty box for one second."];
-    case "DISPATCHED": return ["move", "3", `Moving the ${obj} to box ${t}`, `From box ${f}. Keep hands clear until it's done.`];
+    case "DISPATCHED": return ["move", "3", `Moving the ${obj} to box ${t}`,
+      `From box ${f}${gripText(sel.obj) ? ", " + gripText(sel.obj) : ""}. Keep hands clear until it's done.`];
     default:
       if (reject && performance.now() < reject.until) return ["bad", "!", reject.h, reject.d];
       if (sel.msg === "robot busy") return ["move", "3", "Wait for the robot to finish", "It's still completing the last move."];
@@ -246,14 +250,15 @@ function renderMoves(moves) {
       const path = m.from && m.to ? `Box ${m.from} → Box ${m.to}` : m.from ? `From box ${m.from}` : "";
       const why = m.status === "rejected" ? rejectText(m.note, m.from, m.to)[0] : m.status === "cancelled" ? m.note
                 : m.status === "done" && m.secs != null ? `${m.secs} s` : m.status === "moving" ? "moving now" : "";
+      const grip = m.obj ? gripText(m.obj) : "";
       return `<li data-r="${m.status}"><i>${icon}</i><b>${m.obj ? objName(m.obj) : "Move"}</b>
-        <span class="what">${path}${why ? `<small>${esc(why)}</small>` : ""}</span><time>${clock(m.t)}</time></li>`;
+        <span class="what">${path}${grip ? " · " + grip : ""}${why ? `<small>${esc(why)}</small>` : ""}</span><time>${clock(m.t)}</time></li>`;
     }).join("");
   const RES = { done: "Done", moving: "Moving", rejected: "Rejected", cancelled: "Cancelled", "no-response": "No reply from robot" };
   $("moves").innerHTML = moves.length ? moves.map(m => {
     const why = m.status === "rejected" ? rejectText(m.note, m.from, m.to)[0] : m.status === "cancelled" ? m.note : "";
     return `<tr><td class="time">${clock(m.t)}</td><td>${m.obj ? objName(m.obj) : "–"}</td><td>${m.from ? "Box " + m.from : "–"}</td>
-      <td>${m.to ? "Box " + m.to : "–"}</td><td class="num">${m.grip ? m.grip[0] + "–" + m.grip[1] : "–"}</td>
+      <td>${m.to ? "Box " + m.to : "–"}</td><td class="num">${m.grip ? (GRIP[m.obj] ? GRIP[m.obj] + " " : "") + m.grip[0] + "–" + m.grip[1] : "–"}</td>
       <td class="num">${m.secs != null ? m.secs + " s" : "–"}</td><td><span class="res" data-r="${m.status}">${RES[m.status] || m.status}</span>${why ? `<span class="why">${esc(why)}</span>` : ""}</td></tr>`;
   }).join("") : `<tr><td colspan="7" style="color:var(--muted)">No moves yet.</td></tr>`;
 }
