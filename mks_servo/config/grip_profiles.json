@@ -1,6 +1,6 @@
 {
-  "_comment": "Per-object grip force in raw FSR counts (average of both jaws). GRIP closes until 'target'; if either jaw goes above 'max' the jaws back off at once. PLACEHOLDERS: tune by testing, egg first.",
-  "egg":   {"target": 600,  "max": 900},
-  "cup":   {"target": 500,  "max": 800},
-  "block": {"target": 1500, "max": 2500}
+  "_comment": "Per-object grip force in raw FSR counts (3.3k divider). GRIP closes until the AVERAGE of both jaws reaches 'target'; if EITHER jaw goes above 'max' the jaws back off at once. Measured Nov 22: a firm hold on a ~40-46 mm object averages ~300 (the jaw nearer the object reads 2-4x the other); force rises ~70-100 counts per servo degree after contact. Tune the egg first.",
+  "egg":   {"target": 250, "max": 700},
+  "cup":   {"target": 200, "max": 600},
+  "block": {"target": 350, "max": 1200}
 }
