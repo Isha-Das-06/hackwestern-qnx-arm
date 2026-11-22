@@ -93,7 +93,9 @@ def text(img, s, org, scale, col, thick=1):
 
 
 class FakeRobot:
-    """Stand-in for the QNX control task: busy for 3 s after each pick."""
+    """Stand-in for the QNX control task: busy for 3 s after each pick.
+    No START gate without the arm: pointing always counts."""
+    gate = False
 
     def __init__(self):
         self.busy_until = 0.0
@@ -101,6 +103,15 @@ class FakeRobot:
 
     def busy(self):
         return now_ms() < self.busy_until
+
+    def armed(self):
+        return True
+
+    def select_left(self):
+        return 0.0
+
+    def request_start(self):
+        pass
 
     def send_pick(self, src, label, dst, grip):
         lo, hi = grip[NAMES[label]]
@@ -347,6 +358,10 @@ def main():
         over = tray.hit(tip[0], tip[1], W, H) if tip else -1  # fingertip is over this pocket
         # Only a pointing hand selects; a hand placing/holding an object doesn't.
         hover = over if (pointing or args.no_point_check) else -1
+        # With the arm, a new move only starts inside the START window, so people
+        # can shuffle objects without anything being selected.
+        if selector.state == IDLE and not robot.armed():
+            hover = -1
 
         # ---- pockets: is a hand over it? if not, what's in it? ----
         occluded = []
@@ -422,7 +437,7 @@ def main():
                       f" | pointing {'YES' if pointing else 'no'}{bs} | {selector.state}")
 
         robot.heartbeat(fps, selector.state, last_pred,
-                        round(frame_ms[-1], 1) if frame_ms else None)
+                        round(frame_ms[-1], 1) if frame_ms else None, hands=len(hands))
 
         # ---- draw ----
         if not args.headless or args.save_frame:  # the browser draws its own overlay
@@ -531,7 +546,9 @@ def main():
                            if NAMES[last_pred[i][0]] in grip else None}
                           for i in range(len(tray))],
                 "robot": {"busy": robot.busy(), "last": robot.last, "last_t": robot.last_t,
-                          "link": "simulated"},  # "connected" once the real control task is wired
+                          "link": "connected" if args.arm else "simulated",
+                          "gate": robot.gate, "armed": robot.armed(),
+                          "select_s": round(robot.select_left(), 1)},
                 "moves": [{k: v for k, v in m.items() if k != "t_sent"} for m in moves],
                 "setup": {"calib": ui["calib"], "calib_i": ui["calib_i"], "calib_one": ui["calib_one"],
                           "boxes_set": ui["boxes_set"], "focus": ui["focus"],
@@ -546,6 +563,8 @@ def main():
                     set_pocket(*ev[1:])
                 elif ev[0] == "focus" and 0 <= ev[1] < len(tray):
                     ui["focus"] = ev[1]
+                elif ev[0] == "start":
+                    robot.request_start()
                 elif ev[0] == "cancel" and selector.state not in (IDLE, DISPATCHED):
                     add_move("cancelled", "Cancelled from the console")
                     selector._finish(t, "move cancelled")

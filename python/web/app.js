@@ -70,7 +70,7 @@ function rejectText(msg, from, to) {           // from/to are 1-based box number
 }
 
 // returns [tone, badge, headline, detail]
-function status(sel, setup, n) {
+function status(sel, setup, n, robot) {
   const f = sel.from + 1, t = sel.to + 1, obj = sel.obj || "object", first = sel.phase === "from";
   if (setup.calib) return setup.calib_one
     ? ["setup", "✎", `Redraw box ${setup.calib_i + 1}`, "Drag a rectangle around it on the camera picture."]
@@ -87,6 +87,8 @@ function status(sel, setup, n) {
     default:
       if (reject && performance.now() < reject.until) return ["bad", "!", reject.h, reject.d];
       if (sel.msg === "robot busy") return ["move", "3", "Wait for the robot to finish", "It's still completing the last move."];
+      if (robot && robot.gate && !robot.armed)
+        return ["idle", "▶", "Press START to move an object", "Shuffle objects freely: pointing only counts after START."];
       return ["idle", "1", "Point at an object to move it", "Hold your index finger over its box for one second."];
   }
 }
@@ -160,7 +162,7 @@ function render() {
   $("lamp-text").textContent = robot.busy ? "Robot moving" : "Live";
 
   // status bar
-  const [tone, badge, h, d] = status(sel, setup, boxes.length);
+  const [tone, badge, h, d] = status(sel, setup, boxes.length, robot);
   $("status").dataset.tone = tone;
   $("badge").textContent = badge;
   $("instr").textContent = h;
@@ -171,6 +173,7 @@ function render() {
   $("count").hidden = !counting;
   if (counting) $("count-n").textContent = Math.ceil(sel.time_left_ms / 1000);
   $("cancel").hidden = !busyMove(sel.state) || setup.calib;
+  $("start").hidden = !robot.gate || robot.armed || busyMove(sel.state) || setup.calib;
 
   // boxes
   $("boxes").innerHTML = boxes.map((b, i) => {
@@ -426,6 +429,7 @@ $("recent-all").addEventListener("click", () => $("moves-dlg").showModal());
 document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => b.closest("dialog").close()));
 document.querySelectorAll("dialog").forEach(d => d.addEventListener("click", e => { if (e.target === d) d.close(); }));
 $("cancel").addEventListener("click", () => cmd("cancel"));
+$("start").addEventListener("click", () => cmd("start"));
 $("draw").addEventListener("click", () => key("c"));
 $("redraw").addEventListener("click", e => { const b = e.target.closest("button"); if (b) cmd("redraw", "&i=" + b.dataset.i); });
 $("bg").addEventListener("click", () => key("b"));

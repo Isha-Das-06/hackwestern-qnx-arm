@@ -9,7 +9,7 @@ Endpoints:
   /state       everything the page shows, as JSON (polled a few times a second)
   /key?k=c     same as pressing a key in the window (c b tab 1 2 3 x m)
   /rect?x0=..  a box drawn with the mouse/finger (0..1 coordinates)
-  /cmd?c=..    focus&i=N (pick box N for teaching) | cancel (cancel the move)
+  /cmd?c=..    focus&i=N (pick box N for teaching) | cancel (cancel the move) | start (START)
                redraw&i=N (draw box N again) | teach&k=1..3 (teach from the non-empty box)
                forget&k=1..3 (delete one object's examples) | forgetbg (delete the empty-tray photo)
 
@@ -111,6 +111,8 @@ class WebUI:
                             pass
                     elif c == "cancel":
                         ui.events.append(("cancel",))
+                    elif c == "start":  # same as the green START button on the robot
+                        ui.events.append(("start",))
                     elif c == "redraw":  # draw just one box again
                         try:
                             ui.events.append(("redraw", int(q.get("i", ["0"])[0])))

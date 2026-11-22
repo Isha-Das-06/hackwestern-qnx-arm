@@ -218,6 +218,7 @@ class Supervisor:
         self.select_until = 0.0      # START window (monotonic time)
         self.next_select_push = 0.0
         self.start_reads = 0
+        self.console_starts = 0
         self.lock = threading.Lock()
         self.fake_pico = None
         ports = {"gripper": self.grip_cfg["telemetry_port"],
@@ -357,15 +358,20 @@ class Supervisor:
                 self.event(f"restarting vision (#{v.restarts})")
                 v.start()
 
-        # 5. START button (2 reads in a row = pressed) opens the pointing window;
-        #    vision hears how long is left, 5 times a second.
+        # 5. START button (2 reads in a row = pressed) or the console's START
+        #    opens the pointing window; it closes once the arm is moving (one
+        #    START = one move). Vision hears how long is left, 5 times a second.
         if self.io.start_pressed():
             self.start_reads += 1
             if self.start_reads == 2:
                 self.open_select("button")
         else:
             self.start_reads = 0
-        if self.fault:
+        start_n = int((v.last_msg or {}).get("start_n", 0))
+        if start_n > self.console_starts:
+            self.open_select("console")
+        self.console_starts = start_n          # also follows a restarted vision back to 0
+        if self.fault or (m.last_msg or {}).get("busy"):
             self.select_until = 0.0
         if now >= self.next_select_push:
             self.next_select_push = now + 0.2
