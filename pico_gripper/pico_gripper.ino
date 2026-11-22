@@ -4,12 +4,13 @@
 // the Pi at ~200 Hz. QNX on the Pi makes every grip decision AND drives the
 // servo itself (hardware PWM on Pi GPIO19), so nothing here can move the jaws.
 //
-// Wiring (see docs/GRIPPER.md):
-//   FSR jaw 1  -> GP26 (ADC0), divider: 3V3 OUT (pin 36) - FSR - GP26 (pin 31) - 3.3k - GND
-//   FSR jaw 2  -> GP27 (ADC1), divider: 3V3 OUT (pin 36) - FSR - GP27 (pin 32) - 3.3k - GND
-//   UART0 TX   -> GP0 (pin 1)  -> Pi GPIO9 RX (pin 21)
-//   GND        -> GND (pin 3)  -> Pi GND (pin 25)
-//   Power      -> USB (a Pi USB port on the robot). Never also feed VSYS.
+// Board: Tenstar RP2350 USB-A (FQBN rp2040:rp2040:rpipico2; go by the GPIO labels
+// on the board). Wiring (see docs/GRIPPER.md):
+//   FSR jaw 1  -> GP26 (ADC0), divider: 3V3 - FSR - GP26 - 3.3k - GND
+//   FSR jaw 2  -> GP27 (ADC1), divider: 3V3 - FSR - GP27 - 3.3k - GND
+//   UART0 TX   -> GP0  -> Pi GPIO9 RX (Pi pin 21)
+//   GND        -> GND  -> Pi GND (Pi pin 25)
+//   Power      -> its USB-A plug in a Pi USB port. Never also feed 5V/VSYS.
 //
 // Pico -> Pi frame (10 bytes, ~200 Hz):
 //   0xAA 0x55 fsr1_lo fsr1_hi fsr2_lo fsr2_hi 0 0 seq xor
@@ -44,6 +45,7 @@ static void sendFrame() {
                     0, 0, txSeq++, 0};
   for (int i = 0; i < 9; i++) fr[9] ^= fr[i];
   Serial1.write(fr, sizeof fr);
+  if (txSeq % 100 == 0) Serial.printf("fsr1=%4u fsr2=%4u\n", f1, f2);   // USB, 2 Hz: alive check
 }
 
 void setup() {
@@ -52,7 +54,6 @@ void setup() {
   Serial1.setRX(1);
   Serial1.begin(BAUD);
   Serial.begin(115200);          // USB serial, for debugging only
-  pinMode(LED_BUILTIN, OUTPUT);
   nextFrameUs = micros();
 }
 
@@ -62,6 +63,5 @@ void loop() {
     nextFrameUs += FRAME_PERIOD_US;
     if ((int32_t)(now - nextFrameUs) > (int32_t)FRAME_PERIOD_US) nextFrameUs = now;  // fell behind
     sendFrame();
-    digitalWrite(LED_BUILTIN, (millis() / 500) & 1);   // slow blink = streaming
   }
 }
