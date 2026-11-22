@@ -122,6 +122,11 @@ class FakeServo:
             self._tick()
             return self.actual % 360.0 if not self.has_checksum else self.actual
 
+    def pulses_received(self):
+        with self.lock:
+            self._tick()
+            return int(self.commanded / 360.0 * self.PULSES_PER_REV)
+
     def shaft_error_degrees(self):
         with self.lock:
             self._tick()

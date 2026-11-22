@@ -299,14 +299,17 @@ class Motion:
             j = self.joints[name]
             speed = max(c["min_speed"], min(j.cfg["max_speed"], round(abs(d) / (t_move * k))))
             start = j.motor_deg()
+            pulses = int(abs(d) / 360.0 * j.m.PULSES_PER_REV)
+            p0 = j.m.pulses_received()
             if j.m.has_checksum:      # V1.1: exact pulse move, the driver stops itself
                 done0 = j.m.moves_completed
-                j.m.move(j.direction(d), speed, int(abs(d) / 360.0 * j.m.PULSES_PER_REV))
-            else:                     # V1.0: run, we stop it on the encoder
+                j.m.move(j.direction(d), speed, pulses)
+            else:                     # V1.0: run, we stop it on its pulse counter
                 done0 = None
                 j.m.run(j.direction(d), speed)
             active[name] = {"d": d, "start": start, "done0": done0, "last": start,
-                            "speed": speed, "over": 0, "prev": (time.monotonic(), start), "v": 0.0}
+                            "p0": p0, "pulses": pulses,
+                            "speed": speed, "over": 0, "prev": (time.monotonic(), 0), "v": 0.0}
         deadline = time.monotonic() + t_move * c["timeout_factor"] + c["timeout_margin_s"]
         next_progress = time.monotonic() + c["progress_check_s"]
         next_stall = next_slip = time.monotonic() + 0.5
@@ -337,19 +340,24 @@ class Motion:
                     pos = j.motor_deg()
                     moved = (pos - a["start"]) * (1 if a["d"] > 0 else -1)
                     if a["done0"] is None:
-                        # V1.0 stops at its commanded angle, which runs `lag` ahead
-                        # of the shaft, and the stop lands one loop late: stop early
-                        # by both (measured each loop).
-                        t_prev, p_prev = a["prev"]
+                        # V1.0: its pulse counter is the commanded position, and the
+                        # shaft settles exactly there after a stop (measured within
+                        # 0.4 deg). Stop when the counter reaches the target, early by
+                        # what it counts while the stop is on its way.
+                        cmd = abs(j.m.pulses_received() - a["p0"])
+                        t_prev, c_prev = a["prev"]
                         now_t = time.monotonic()
                         if now_t > t_prev:
-                            a["v"] = abs(pos - p_prev) / (now_t - t_prev)
-                        a["prev"] = (now_t, pos)
-                        lead = a.get("lag", 0.0) + c["v10_stop_lead_s"] * a["v"]
-                        if moved >= abs(a["d"]) - lead:
+                            a["v"] = (cmd - c_prev) / (now_t - t_prev)
+                        a["prev"] = (now_t, cmd)
+                        if cmd >= a["pulses"] - c["v10_stop_lead_s"] * a["v"]:
                             j.m.stop()
                             del active[name]
-                    elif j.m.moves_completed > a["done0"] or moved >= abs(a["d"]) - 0.2:
+                    # V1.1: done on its "move finished" frame, or when its pulse
+                    # counter has reached the commanded count (the shaft itself sags
+                    # under load, so its position can't tell).
+                    elif j.m.moves_completed > a["done0"] or \
+                            abs(j.m.pulses_received() - a["p0"]) >= a["pulses"] - 2:
                         del active[name]
                 if now > next_progress:
                     for name, a in active.items():
@@ -359,8 +367,13 @@ class Motion:
                         a["last"] = pos
                     next_progress = now + c["progress_check_s"]
                 if now > next_stall:
+                    # Only where the driver's own stall protection is on; with it
+                    # off (lift) the lag check does this job, and 0x3E's reply can
+                    # be confused with the move-started frame.
                     for name in active:
-                        if self.joints[name].m.has_checksum and self.joints[name].m.is_stalled():
+                        j = self.joints[name]
+                        if j.m.has_checksum and j.cfg.get("stall_protection", True) \
+                                and j.m.is_stalled():
                             raise Fault(f"{name} driver reports a stall")
                     next_stall = now + 0.5
                 if self.carrying and now > next_slip:
@@ -370,8 +383,14 @@ class Motion:
                     next_slip = now + 0.1
                 if now > deadline:
                     raise Fault(f"move timed out ({', '.join(active)})")
-            if any(not self.joints[n].m.has_checksum for n in todo):
-                time.sleep(c["v10_settle_s"])     # V1.0 is still closing on its target
+            # V1.0 keeps closing on its commanded angle after the stop (slowly for
+            # the last couple of degrees): wait until it's there.
+            settle_by = time.monotonic() + c["v10_settle_s"]
+            for n in todo:
+                m = self.joints[n].m
+                while not m.has_checksum and abs(m.shaft_error_degrees()) > c["v10_settle_lag_deg"] \
+                        and time.monotonic() < settle_by:
+                    time.sleep(0.03)
             return True
         except BaseException:
             self.hold_all()
