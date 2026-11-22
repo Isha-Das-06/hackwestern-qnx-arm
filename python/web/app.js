@@ -2,7 +2,8 @@
 "use strict";
 const $ = id => document.getElementById(id);
 const cam = $("cam"), cv = $("overlay"), frameEl = $("frame");
-const OBJ = { egg: "Egg", cup: "Cup", block: "Block", empty: "Empty", unknown: "Unknown" };
+// what the operator sees; the ids (egg/cup/block) stay the same inside the app and to the arm
+const OBJ = { egg: "Pill bottle", cup: "Squeeze bottle", block: "Pills", empty: "Empty", unknown: "Unknown" };
 const KNOWN = ["egg", "cup", "block"];
 const TEACH_GOAL = 5;
 const HAND = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
@@ -15,6 +16,8 @@ const send = (path) => fetch(path, { cache: "no-store" }).catch(() => {});
 const key = (k) => send("/key?k=" + encodeURIComponent(k));
 const cmd = (c, extra = "") => send(`/cmd?c=${c}${extra}`);
 const upper = (s) => s ? s[0].toUpperCase() + s.slice(1) : s;
+const objName = (id) => OBJ[id] || upper(id);              // "Pill bottle"
+const objLower = (id) => objName(id).toLowerCase();         // "pill bottle" (inside a sentence)
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 // Pi times -> this computer's clock (the Pi's clock can be wrong after a reboot without internet)
 const clock = (epoch) => new Date(S && S.sys && S.sys.now ? Date.now() - (S.sys.now - epoch) * 1000 : epoch * 1000)
@@ -65,13 +68,13 @@ function rejectText(msg, from, to) {           // from/to are 1-based box number
   if (msg === "can't identify object") return [`Can't tell what's in box ${from}`, "Teach this object in Set up, then try again."];
   if (msg.startsWith("can't tell")) return [`Can't tell whether box ${to} is empty`, "Take a new empty-tray photo in Set up."];
   const m = msg.match(/has an? (\w+) in it/);
-  if (m) return [`Box ${to} already has a ${m[1]} in it`, "Point at an empty box instead."];
+  if (m) return [`Box ${to} isn't empty`, `The ${objLower(m[1])} is in it. Point at an empty box instead.`];
   return [upper(msg), ""];
 }
 
 // returns [tone, badge, headline, detail]
 function status(sel, setup, n, robot) {
-  const f = sel.from + 1, t = sel.to + 1, obj = sel.obj || "object", first = sel.phase === "from";
+  const f = sel.from + 1, t = sel.to + 1, obj = sel.obj ? objLower(sel.obj) : "object", first = sel.phase === "from";
   if (setup.calib) return setup.calib_one
     ? ["setup", "✎", `Redraw box ${setup.calib_i + 1}`, "Drag a rectangle around it on the camera picture."]
     : ["setup", "✎", `Draw box ${setup.calib_i + 1} of ${n}`, "Drag a rectangle around it on the camera picture."];
@@ -234,7 +237,7 @@ function renderMoves(moves) {
     const icon = { done: "✓", moving: "↻", rejected: "✕", cancelled: "–", "no-response": "✕" }[m.status] || "•";
     const path = m.from && m.to ? `${m.from} → ${m.to}` : m.from ? `from ${m.from}` : "";
     const why = m.status === "rejected" ? rejectText(m.note, m.from, m.to)[0] : m.status === "cancelled" ? "cancelled" : "";
-    return `<li class="chip" data-r="${m.status}"><i>${icon}</i>${m.obj ? upper(m.obj) : "Move"} <small>${path}${why ? " · " + esc(why.toLowerCase()) : ""}</small></li>`;
+    return `<li class="chip" data-r="${m.status}"><i>${icon}</i>${m.obj ? objName(m.obj) : "Move"} <small>${path}${why ? " · " + esc(why.toLowerCase()) : ""}</small></li>`;
   }).join("");
   $("recent-stats").innerHTML = moves.length ? $("stats").innerHTML : "";
   $("recent-list").innerHTML = !moves.length ? `<li class="empty">No moves yet. Point at an object to start one.</li>`
@@ -243,13 +246,13 @@ function renderMoves(moves) {
       const path = m.from && m.to ? `Box ${m.from} → Box ${m.to}` : m.from ? `From box ${m.from}` : "";
       const why = m.status === "rejected" ? rejectText(m.note, m.from, m.to)[0] : m.status === "cancelled" ? m.note
                 : m.status === "done" && m.secs != null ? `${m.secs} s` : m.status === "moving" ? "moving now" : "";
-      return `<li data-r="${m.status}"><i>${icon}</i><b>${m.obj ? upper(m.obj) : "Move"}</b>
+      return `<li data-r="${m.status}"><i>${icon}</i><b>${m.obj ? objName(m.obj) : "Move"}</b>
         <span class="what">${path}${why ? `<small>${esc(why)}</small>` : ""}</span><time>${clock(m.t)}</time></li>`;
     }).join("");
   const RES = { done: "Done", moving: "Moving", rejected: "Rejected", cancelled: "Cancelled", "no-response": "No reply from robot" };
   $("moves").innerHTML = moves.length ? moves.map(m => {
     const why = m.status === "rejected" ? rejectText(m.note, m.from, m.to)[0] : m.status === "cancelled" ? m.note : "";
-    return `<tr><td class="time">${clock(m.t)}</td><td>${m.obj ? upper(m.obj) : "–"}</td><td>${m.from ? "Box " + m.from : "–"}</td>
+    return `<tr><td class="time">${clock(m.t)}</td><td>${m.obj ? objName(m.obj) : "–"}</td><td>${m.from ? "Box " + m.from : "–"}</td>
       <td>${m.to ? "Box " + m.to : "–"}</td><td class="num">${m.grip ? m.grip[0] + "–" + m.grip[1] : "–"}</td>
       <td class="num">${m.secs != null ? m.secs + " s" : "–"}</td><td><span class="res" data-r="${m.status}">${RES[m.status] || m.status}</span>${why ? `<span class="why">${esc(why)}</span>` : ""}</td></tr>`;
   }).join("") : `<tr><td colspan="7" style="color:var(--muted)">No moves yet.</td></tr>`;
@@ -343,13 +346,18 @@ function draw() {
     const unknown = !b.hand && b.label === "unknown" && setup.has_bg;  // something's there, but not a taught object
     const what = b.hand ? "Hand" : KNOWN.includes(b.label) ? OBJ[b.label] : b.label === "empty" ? "Empty"
       : unknown ? "Unknown" : "";
-    let txt = what ? `${i + 1}  ${what}` : `${i + 1}`;
-    ctx.font = `600 ${fs}px "Inter", sans-serif`;
-    if (ctx.measureText(txt).width + fs * 1.6 > w - 12) txt = unknown ? `${i + 1} ?` : `${i + 1}`;
-    if (unknown && !role) tag(ctx, x + 6, y + 6, txt, C.amber, "#1A1203", fs);
-    else if (role === "from") tag(ctx, x + 6, y + 6, txt, C.blue, "#fff", fs);
-    else if (role === "to" || role === "calib") tag(ctx, x + 6, y + 6, txt, C.amber, "#1A1203", fs);
-    else tag(ctx, x + 6, y + 6, txt, "rgba(8,10,13,.8)", what === "Empty" ? "#A1A9B6" : "#E9ECF0", fs);
+    let txt = what ? `${i + 1} ${what}` : `${i + 1}`;
+    // narrow box: shrink the text to fit (down to 60%) before giving up on the word
+    let lf = fs;
+    ctx.font = `600 ${lf}px "Inter", sans-serif`;
+    while (lf > fs * 0.6 && ctx.measureText(txt).width + lf * 1.6 > w - 12) {
+      lf -= 1; ctx.font = `600 ${lf}px "Inter", sans-serif`;
+    }
+    if (ctx.measureText(txt).width + lf * 1.6 > w - 12) txt = unknown ? `${i + 1} ?` : `${i + 1}`;
+    if (unknown && !role) tag(ctx, x + 6, y + 6, txt, C.amber, "#1A1203", lf);
+    else if (role === "from") tag(ctx, x + 6, y + 6, txt, C.blue, "#fff", lf);
+    else if (role === "to" || role === "calib") tag(ctx, x + 6, y + 6, txt, C.amber, "#1A1203", lf);
+    else tag(ctx, x + 6, y + 6, txt, "rgba(8,10,13,.8)", what === "Empty" ? "#A1A9B6" : "#E9ECF0", lf);
     ctx.restore();
   });
 
@@ -437,7 +445,7 @@ $("teach").addEventListener("click", e => { const b = e.target.closest("[data-te
 $("forget").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
   if (b.dataset.k === "all") {
-    if (confirm("Delete every taught example for egg, cup and block? You'll need to teach them again.")) key("x");
+    if (confirm("Delete every taught example for the pill bottle, squeeze bottle and pills? You'll need to teach them again.")) key("x");
   } else {
     const name = OBJ[KNOWN[b.dataset.k - 1]];
     if (confirm(`Delete the taught examples for ${name}? The other objects stay.`)) cmd("forget", "&k=" + b.dataset.k);

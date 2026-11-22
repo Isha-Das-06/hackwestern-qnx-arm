@@ -199,8 +199,8 @@ body.setup-open .grid{grid-template-columns:minmax(0,1fr) 460px}
 .seg button[data-on="1"]{background:var(--amber);color:#1A1203;border-color:var(--amber)}
 .warn-line{color:var(--amber);font-size:13.5px;margin-bottom:10px}
 .teach{display:grid;gap:10px}
-.teach li{display:grid;grid-template-columns:52px 1fr 64px auto;align-items:center;gap:12px}
-.teach .tn{font-weight:600}
+.teach li{display:grid;grid-template-columns:7.6em 1fr 64px auto;align-items:center;gap:12px}
+.teach .tn{font-weight:600;white-space:nowrap}
 .bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
 .bar span{display:block;height:100%;background:var(--muted);border-radius:3px}
 .teach li[data-ok="1"] .bar span{background:var(--green)}
