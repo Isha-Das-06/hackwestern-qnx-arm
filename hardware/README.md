@@ -1,4 +1,4 @@
-# FixtureTeach hardware
+# Grabbit hardware
 
 - Open the R3.2 baseline in [FreeCAD](cad/FixtureTeach-R3.2.FCStd) or download the [STEP assembly](cad/FixtureTeach-R3.2.step).
 - Get the [printable STLs](print/) and the [updated parts](print/updated-parts/).
