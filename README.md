@@ -150,6 +150,25 @@ examples of each object. Boxes are stored in `config/tray.yml`, examples in
 `config/classifier_py.npz`. An empty pocket is "pixels match the empty photo."
 Anything that matches neither the examples nor empty is unknown.
 
+## History dashboard
+
+The Pi also posts history to a server on Vultr, which writes it into Tiger Data
+(TimescaleDB) and serves it at [http://66.42.92.71/](http://66.42.92.71/).
+The arm does not wait on this. With no network, the history pauses and the
+robot keeps moving.
+
+The page is PickVision robot history:
+
+- Move count, how many finished, median reaction time, and the share of vision frames under 200 ms. Ranges are 1 hour, 6 hours, 24 hours, and 7 days. This block refreshes every 10 seconds.
+- Live gripper force for the last 2 minutes, refreshed every second. Both jaw sensors, the target, the max, the jaw angle, and the grip state, at about 10 samples a second while the Pi is sending.
+- Moves over time (finished and not), a finished-out-of-tried bar for each object, vision frame time against the 200 ms line, and the latest moves with box, result, reaction time, and robot time.
+
+Tiger Data is in use: `moves` and `health` are hypertables, `health_1m` is a
+real-time continuous aggregate (the chart includes rows newer than the last
+refresh), and raw health samples are compressed after 7 days. The page shows
+those three features as on. The server code is `cloud/`. The Pi sends only
+when `config/cloud.json` is present.
+
 ## Layout
 
 | Path | What it is |
@@ -162,7 +181,7 @@ Anything that matches neither the examples nor empty is unknown.
 | `models/` | Palm and landmark models |
 | `config/` | Tray boxes, taught examples, grip windows for the console |
 | `docs/` | Wiring, protocols, and what was tested on the Pi |
-| `cloud/` | Optional move history (Vultr + Tiger Data). No `config/cloud.json` means cloud off. The robot runs without it |
+| `cloud/` | History service for the [Vultr dashboard](http://66.42.92.71/). Tiger Data stores the rows. No `config/cloud.json` means the Pi does not send |
 | `design/` | Earlier console mockups |
 | `src/`, `CMakeLists.txt` | Earlier C++ vision app. The robot runs the Python app |
 

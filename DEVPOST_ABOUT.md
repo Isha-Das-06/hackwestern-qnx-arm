@@ -15,30 +15,30 @@ We built it on **QNX**, the RTOS used in cars and medical devices, and ran every
 
 ## Why an RTOS, and why QNX
 
-On an ordinary operating system, a busy program can delay everything else. On QNX, the most important task always runs first.
+On an ordinary operating system, a busy program can delay everything else. QNX 8's scheduler is priority-based and preemptive: the highest-priority ready thread runs, and a lower-priority thread cannot push it aside. We run the stock QNX Everywhere image on the Pi. Each job is its own process, started with `on -p` so the priority is explicit.
 
-- **Deterministic timing.** Grip control runs at a high real-time priority, 100 times a second. We loaded every CPU core on the Pi and measured it: never more than **half a millisecond late, zero missed deadlines**. The exact same code at normal priority was up to **137 ms late** and missed over a hundred deadlines.
-- **Process isolation.** Vision, grip control, arm motion and the supervisor are separate QNX processes with their own memory. A crash in one can't corrupt the others.
-- **Crash recovery.** A supervisor watches a heartbeat from every process. Kill the AI mid-move, and the arm stops and holds the object, vision is restarted, and the move finishes.
+- **Deterministic timing.** Grip control is priority 30, with a hard deadline every 10 ms (100 Hz). Arm motion is also priority 30 (50 Hz). The supervisor is priority 40 and reads the safety pins at 100 Hz. Vision, which can afford to be late, is priority 10. We loaded all four cores with six busy loops at normal priority. The grip loop's worst lateness was **0.49 ms, with zero missed deadlines**. Motion stayed within about 1 ms. The same grip code, started at priority 10 under the same load, was up to **137 ms late** and missed **124** deadlines.
+- **Spatial isolation.** QNX is a microkernel, so a crash stays inside one process. Vision, grip control, arm motion and the supervisor each have their own memory. The UART drivers (`devc-serpl011` on UART3, UART4 and UART5) and the GPIO driver are processes of their own. Vision cannot corrupt the grip loop or the motor drivers by crashing.
+- **Crash recovery.** Grip control heartbeats at 20 Hz, motion at 10 Hz, vision at 5 Hz. Kill the vision process mid-move and the supervisor, still at priority 40, pauses motion in place: the motors stay enabled and the grip holds. It restarts vision, then resumes the same move. A vision crash is never a fault.
 
 ## Safety, layer by layer
 
 We designed for failure first. Every layer has a defined safe state:
 
 1. **Emergency stop:** a hardware button cuts motor power. Its sense wire is normally-closed, so a loose wire also reads as "stop".
-2. **Supervisor:** if grip control, motion, or the link to the gripper goes silent, it faults, stops the arm and holds. Only a deliberate reset clears it.
-3. **Gripper watchdog:** a small Pico controller drives the gripper, but only QNX makes decisions. If QNX goes quiet for 100 ms, the Pico freezes the gripper in place instead of letting go.
+2. **Supervisor:** priority 40. If grip control or motion dies or goes silent, if the force readings go stale, or if motion reports its own fault (blocked, stall, timeout, slip), it latches a FAULT, tells the arm to stop and hold, and lights the fault LED. If the motion process itself is dead, the supervisor opens the motor ports and sends the hold command on the UART. Only a deliberate reset clears a fault.
+3. **Process-owned outputs.** Actuator power is a 100% PWM the supervisor holds on GPIO18. The servo pulse is a hardware PWM grip control holds on GPIO19. Both go through QNX's GPIO driver, so `kill -9` on that process stops the pulses: supervisor death drops actuator power. The Pico only streams the two force sensors. If those frames stop, the grip process holds the last angle and the supervisor faults. Every close, back-off and slip check is a decision inside the priority-30 loop.
 4. **Force limits:** if either jaw goes over the object's maximum force, the gripper backs off. If the force drops while carrying, it flags a slip and stops.
 5. **Motion limits:** soft joint limits, stall detection, and every bad request refused before anything moves.
 6. **AI limits:** unknown objects and full target boxes are refused, not guessed at.
 
 ## How we built it
 
-- **AI on QNX:** hand tracking runs on **TensorFlow Lite through QNX's ported `tflite_runtime`**, using the QNX AI workshop hand-tracking models. We ported QNX's C++ sample to Python. Objects are recognised by a small classifier you teach on the spot with about five examples.
-- **Camera:** OpenCV can't open cameras on QNX, so we wrote a C program on QNX's camera API.
-- **Hardware:** a 3D-printed two-joint arm, two closed-loop stepper motors over UART, and a servo gripper with force sensors in both jaws, read by a Raspberry Pi Pico that talks to the Pi over UART.
+- **AI on QNX:** hand tracking runs on **TensorFlow Lite through QNX's ported `tflite_runtime`** (the QNX 8 aarch64 port on oss.qnx.com), using the QNX AI workshop hand-tracking models. We ported QNX's C++ sample to Python and run that process at priority 10, so inference cannot preempt the grip loop. Objects are recognised by a small classifier you teach on the spot with about five examples.
+- **Camera:** OpenCV can't open cameras on QNX. A small C process, `pv_cam`, opens the camera with QNX camapi (the same API as the AI workshop) and streams frames to Python on a pipe. Python keeps only the newest frame.
+- **Hardware:** a 3D-printed two-joint arm and two closed-loop steppers on QNX serial drivers (`devc-serpl011`, UART3 for the lift, UART5 for the base). Force sensors in both jaws are read by a Raspberry Pi Pico and streamed over UART4. The servo is a hardware PWM from the grip process, so the jaw moves only when that QNX process commands it.
 - **Operator pages:** two web pages served by the Pi. One shows the camera and what the robot thinks is in each box; the other shows the arm, live force readings, and live timing for every process.
-- **Audit trail:** every move and a health sample go to a **Vultr** server and into **Tiger Data** (see below). The robot never waits on the cloud; unplug the network and it keeps working.
+- **Audit trail:** every move, a health sample every 10 seconds, and live gripper force go to a **Vultr** server and into **Tiger Data**. The dashboard is [http://66.42.92.71/](http://66.42.92.71/). The robot never waits on the cloud; unplug the network and it keeps working.
 
 ## Beyond the robot
 
@@ -46,20 +46,20 @@ We designed for failure first. Every layer has a defined safe state:
 
 **The hardware, and what we'd fabricate next.** A working, 3D-printed two-joint arm with two closed-loop stepper motors, a servo gripper with force sensors in both jaws, a Pico handling the sensors, and a fail-safe e-stop circuit. Right now the electronics are hand-soldered on a protoboard. The next version is a custom PCB that combines the Pico, the force-sensor circuit, the UART links to the motors and the e-stop input on one board, so it's smaller, sturdier and easier to build again.
 
-**History and audit trail on Tiger Data.** Every pick, and a health sample every 10 seconds (frame rate, frame timing, on-time percentage, CPU use), go into **TimescaleDB on Tiger Data**. Moves and health samples are stored in hypertables, a 1-minute continuous aggregate powers the history charts without re-scanning raw rows, and compression keeps a long history small. For a pharma line, that's an audit trail: what was moved, when, where to, and whether the robot was running on time.
+**History and audit trail on Tiger Data.** Every pick, a health sample every 10 seconds (frame rate, frame timing, on-time percentage, CPU use), and the gripper's force readings go into **TimescaleDB on Tiger Data**. Moves and health samples are stored in hypertables, a 1-minute continuous aggregate powers the history charts without re-scanning raw rows, and compression keeps a long history small. For a pharma line, that's an audit trail: what was moved, when, where to, and whether the robot was running on time. The live dashboard is [http://66.42.92.71/](http://66.42.92.71/).
 
-**Running the dashboard on Vultr.** A **Vultr** cloud server runs our history service and dashboard. The Pi sends each move and health sample to it, the server writes them into Tiger Data, and anyone on the team can open the dashboard from anywhere. It's off the robot's critical path on purpose: if the network drops, the robot keeps working and only the history pauses.
+**Running the dashboard on Vultr.** A **Vultr** cloud server runs that page and writes into Tiger Data. Open [http://66.42.92.71/](http://66.42.92.71/). Move history refreshes every 10 seconds: how many picks finished, reaction time, frames under the 200 ms budget, and the latest moves. The gripper chart refreshes every second for the last 2 minutes: both jaw sensors, the target force, the max, the jaw angle, and whether the grip is holding, at about 10 samples a second. It's off the robot's critical path on purpose: if the network drops, the robot keeps working and only the history pauses.
 
 ## Challenges we ran into
 
-- **The camera on QNX.** OpenCV couldn't open it, so we wrote our own camera program.
-- **Two motors, two firmwares.** One motor driver ignored the standard move command, so we run it at a set speed and stop it ourselves at the target.
-- **A priority surprise.** Processes started by the supervisor inherited its high priority, so the vision program briefly outranked grip control. That's exactly the kind of bug an RTOS makes you think about. Now each process starts at its own priority.
+- **The camera on QNX.** OpenCV couldn't open it. QNX's camapi could, so `pv_cam` is its own process and Python never talks to the camera driver directly.
+- **Two motors, two firmwares.** One motor driver ignored the standard move command, so the motion process runs it at a set speed on the QNX serial driver and stops it from the pulse count.
+- **A priority surprise.** A child of the supervisor inherited priority 40, so vision briefly outranked grip control at 30. On QNX, priority is inherited unless you set it. We now start every process with `on -p`: supervisor 40, grip and motion 30, vision 10.
 - **Lighting.** "Is this box empty?" depends on a reference photo, so a shadow can make empty boxes look full. We retake the photo before each demo.
 
 ## Accomplishments that we're proud of
 
-- A measured real-time result: under half a millisecond versus 137 ms, from the same code.
+- A measured real-time result: **0.49 ms** late at priority 30 versus **137 ms** and 124 missed deadlines at priority 10, from the same grip loop, with six CPU hogs running.
 - You can crash the AI while the arm carries an object, and nothing gets dropped. (We proved this with simulated motors first.)
 - Six independent safety layers, each with a defined safe state.
 
