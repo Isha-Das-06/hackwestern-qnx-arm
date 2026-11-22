@@ -392,7 +392,8 @@ class Supervisor:
             self.select_until = 0.0
         if now >= self.next_select_push:
             self.next_select_push = now + 0.2
-            v.send_back({"select_s": round(max(0.0, self.select_until - now), 1)})
+            v.send_back({"select_s": round(max(0.0, self.select_until - now), 1),
+                         "fault": self.fault})
 
         # 6. Fault LED: on = FAULT, blinking = paused, off = running normally.
         self.io.set_led(bool(self.fault) or (bool(self.pause_reasons) and int(now * 2) % 2 == 0))

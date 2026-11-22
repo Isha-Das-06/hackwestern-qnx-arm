@@ -97,6 +97,7 @@ class FakeRobot:
     """Stand-in for the QNX control task: busy for 3 s after each pick.
     No START gate without the arm: pointing always counts."""
     gate = False
+    fault = None
 
     def __init__(self):
         self.busy_until = 0.0
@@ -564,7 +565,7 @@ def main():
                           for i in range(len(tray))],
                 "robot": {"busy": robot.busy(), "last": robot.last, "last_t": robot.last_t,
                           "link": "connected" if args.arm else "simulated",
-                          "gate": robot.gate, "armed": robot.armed(),
+                          "gate": robot.gate, "armed": robot.armed(), "fault": robot.fault,
                           "select_s": round(robot.select_left(), 1)},
                 "moves": [{k: v for k, v in m.items() if k != "t_sent"} for m in moves],
                 "setup": {"calib": ui["calib"], "calib_i": ui["calib_i"], "calib_one": ui["calib_one"],

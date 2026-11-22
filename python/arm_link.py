@@ -9,9 +9,10 @@ arm_link: connects this vision app to the QNX arm (pointing.py --arm).
   app crashed), the supervisor pauses the arm, restarts us, and resumes.
   It carries the number of hands in view, and is sent at once when that
   changes: the supervisor pauses the arm while any hand is in view.
-- The supervisor answers with how long the START window has left
-  ({"select_s": 12.4}); pointing only starts a new move while it's open.
-  The console's START button asks the supervisor to open it.
+- The supervisor answers with how long the START window has left and its
+  FAULT, if any ({"select_s": 12.4, "fault": null}); pointing only starts a new
+  move while the window is open. The console's START button asks the supervisor
+  to open it, and the console shows the fault (START is refused until RESET).
 
 Same interface as FakeRobot in pointing.py: busy(), armed(), send_pick(), last, last_t.
 Never blocks the camera loop: every socket call here is non-blocking.
@@ -38,6 +39,7 @@ class ArmRobot:
         self.next_hb = 0.0
         self.pending_until = 0.0      # just sent a PICK: count as busy until motion answers
         self.select_until = 0.0       # START window, from the supervisor
+        self.fault = None             # supervisor's FAULT reason, or None
         self.start_n = 0              # console START presses (the supervisor acts on changes)
         self.last_hands = None
         self.last, self.last_t = "", 0.0
@@ -61,6 +63,7 @@ class ArmRobot:
                 continue
             if "select_s" in r:                       # from the supervisor
                 self.select_until = time.monotonic() + float(r["select_s"])
+                self.fault = r.get("fault")
                 continue
             self.status, self.status_t = r, time.monotonic()
             if r.get("busy"):
