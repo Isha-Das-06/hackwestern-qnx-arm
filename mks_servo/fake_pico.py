@@ -19,10 +19,14 @@ import os
 import time
 import tty
 
+from gripper_link import load_json
+
+g = load_json("gripper.json")
 p = argparse.ArgumentParser()
-p.add_argument("--contact", type=float, default=90.0, help="angle where jaws touch")
+p.add_argument("--contact", type=float, default=(g["open_angle"] + g["closed_angle"]) / 2,
+               help="angle where jaws touch")
 p.add_argument("--stiffness", type=float, default=40.0, help="counts per degree squeezed")
-p.add_argument("--open-angle", type=float, default=150.0)
+p.add_argument("--open-angle", type=float, default=g["open_angle"])
 p.add_argument("--slip-after", type=float, default=0.0)
 p.add_argument("--path-file", default="/tmp/fake_pico_port")
 a = p.parse_args()
@@ -93,7 +97,7 @@ while True:
             print(f"fake_pico: link back after {(now - last_cmd)*1000:.0f} ms", flush=True)
             frozen_reported = False
         last_cmd = now
-        angle = max(10, min(170, fr[2]))          # same clamp as the firmware
+        angle = max(g["angle_min"], min(g["angle_max"], fr[2]))   # same clamp as gripper_link
 
     frozen = last_cmd is not None and now - last_cmd > 0.100
     if frozen and not frozen_reported:
