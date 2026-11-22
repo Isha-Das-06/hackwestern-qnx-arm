@@ -126,7 +126,8 @@ async function tick() {
     $("g_state").textContent = (g.state || "no heartbeat") + (g.slip ? " · SLIP" : "");
     $("g_f1").textContent = g.fsr1 ?? ""; $("g_f2").textContent = g.fsr2 ?? "";
     bar(1, g.fsr1, g.profile); bar(2, g.fsr2, g.profile);
-    $("g_obj").textContent = `${g.object ? objName(g.object) : "–"} / ${g.angle ?? "–"}°`;
+    $("g_obj").textContent = `${g.object ? objName(g.object) : "–"} / ${g.angle ?? "–"}°` +
+      (g.peak ? ` · last grip peak ${g.peak.fsr} at ${g.peak.angle}°` : "");
     $("g_age").textContent = g.link_age_ms != null ? g.link_age_ms + " ms" : "";
     $("v_fps").textContent = v.fps != null ? v.fps + " fps" : "no heartbeat";
     $("v_labels").textContent = (v.labels || []).map((l, i) => `${i + 1}:${objName(l)}`).join("  ");

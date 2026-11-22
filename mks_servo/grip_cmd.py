@@ -36,7 +36,9 @@ def short(r):
     t = r.get("timing", {})
     return (f"{r.get('state')} obj={r.get('object')} ang={r.get('angle')} "
             f"fsr={r.get('fsr1')},{r.get('fsr2')} slip={r.get('slip')} "
-            f"backoffs={r.get('over_max')} age={r.get('link_age_ms')}ms "
+            f"backoffs={r.get('over_max')} "
+            + (f"peak={r['peak']['fsr']}@{r['peak']['angle']}deg " if r.get("peak") else "")
+            + f"age={r.get('link_age_ms')}ms "
             f"jitter max={t.get('jitter_max_ms')}ms missed={t.get('missed_total')}"
             + ("" if r.get("ok", True) else f"  ERROR: {r.get('error')}"))
 

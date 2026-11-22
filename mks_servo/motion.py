@@ -607,12 +607,16 @@ class Motion:
         r = self.gripper_until({"cmd": "GRIP", "object": label}, ("GRIPPED",),
                                ("NO_OBJECT", "OVER_FORCE"), self.cfg["grip_timeout_s"])
         if r["state"] != "GRIPPED":
+            p = r.get("peak") or {}
+            why = (f"{r['state']} (peak {p.get('fsr')} at {p.get('angle')} deg, "
+                   f"target {(r.get('profile') or {}).get('target')})")
+            print(f"motion: grip failed in pocket {src}: {why}", flush=True)
             # Nothing safely held: let go (object is resting in its pocket), go home.
             self.gripper_until({"cmd": "OPEN"}, ("OPEN",), (), self.cfg["release_timeout_s"])
             self.state = "HOME"
             self.move_to({"lift": lift}, "up (grip failed)")
             self.move_to(self.cfg["home_pose"], "home (grip failed)")
-            return f"grip failed: {r['state']}"
+            return f"grip failed: {why}"
         self.carrying = True
         self.state = "LIFT"
         self.move_to({"lift": lift}, f"lifting {label}")

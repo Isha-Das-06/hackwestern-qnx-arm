@@ -160,7 +160,16 @@ class Gripper:
         self.backoffs = 0            # back-offs during the current grip
         self.loaded = False          # reached target during the current grip
         self.was_over = False        # last cycle was over max (count events once)
+        self.peak = None             # strongest reading of the current/last grip, and where
         self.closing_dir = 1 if cfg["closed_angle"] > cfg["open_angle"] else -1
+
+    def summary(self):
+        """One line on how the last grip went (printed when CLOSING ends)."""
+        p = self.peak or {}
+        return (f"gripper: GRIP {self.obj} -> {self.state}: peak {p.get('fsr')} "
+                f"(jaws {p.get('fsr1')},{p.get('fsr2')}) at {p.get('angle')} deg, "
+                f"stopped at {round(self.angle, 1)} deg (closed = {self.cfg['closed_angle']}), "
+                f"target {self.profile and self.profile['target']}, back-offs {self.backoffs}")
 
     def command(self, msg):
         cmd = str(msg.get("cmd", "")).upper()
@@ -174,6 +183,7 @@ class Gripper:
                 return f"unknown object {obj!r}"
             self.obj, self.profile, self.state = obj, self.profiles[obj], "CLOSING"
             self.backoffs, self.loaded = 0, False
+            self.peak = {"fsr": 0, "fsr1": 0, "fsr2": 0, "angle": self.angle}
         elif cmd == "OPEN":
             self.state, self.profile, self.obj = "OPENING", None, None
         elif cmd == "HOLD":
@@ -217,6 +227,8 @@ class Gripper:
         # Every limit is on the stronger jaw: the jaw nearer the object reads
         # 2-4x the other, so the average would hide how hard it is squeezed.
         peak = max(fsr1, fsr2)
+        if self.peak is not None and self.state in ("CLOSING", "GRIPPED") and peak > self.peak["fsr"]:
+            self.peak = {"fsr": peak, "fsr1": fsr1, "fsr2": fsr2, "angle": round(self.angle, 1)}
 
         # Force ceiling: checked every cycle in every state that squeezes.
         # Back off at once; while closing, try again at 1/4 speed, and after
@@ -346,7 +358,7 @@ def main():
             "angle": None if grip.angle is None else round(grip.angle, 1),
             "fsr1": f and f[0], "fsr2": f and f[1], "servo_angle": servo.angle,
             "slip": grip.slip,
-            "over_max": grip.over_max, "profile": grip.profile,
+            "over_max": grip.over_max, "profile": grip.profile, "peak": grip.peak,
             "link_age_ms": None if link.last_rx is None else round((now - link.last_rx) * 1000, 1),
             "frames_ok": link.frames_ok, "frames_bad": link.frames_bad, "seq_gaps": link.seq_gaps,
             "timing": timer.stats(),
@@ -371,7 +383,10 @@ def main():
             reply["ok"], reply["error"] = err is None, err
             cmd_sock.sendto(json.dumps(reply).encode(), addr)
 
+        was = grip.state
         grip.step(link, now)
+        if was == "CLOSING" and grip.state != "CLOSING":
+            print(grip.summary(), flush=True)   # also with --quiet: the grip log
         if grip.angle is not None:
             servo.write(grip.angle)
             link.send(grip.angle, grip.hold_flag())
