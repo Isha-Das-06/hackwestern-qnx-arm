@@ -76,6 +76,11 @@ def is_pointing(pts, world=None):
     return idx > POINT_INDEX_MIN and max(mid, ring) < POINT_OTHERS_MAX * idx
 
 
+# Pointing AT a box from a little away: follow the finger's direction past the tip
+AIM_REACH = 1.5       # up to this many finger lengths (knuckle -> tip) past the tip
+AIM_MAX_REACH = 0.25  # but never further than this fraction of the picture width
+
+
 # ---------------------------------------------------------------- pockets
 N_BOXES = 4  # 3 tray pockets + 1 extra box to put things in; any box can be "from" or "to"
 
@@ -107,6 +112,26 @@ class Tray:
             x0, y0, x1, y1 = self.rect_px(i, frame_w, frame_h)
             if x0 <= px < x1 and y0 <= py < y1:
                 return i
+        return -1
+
+    def aim(self, tip, base, frame_w, frame_h, max_reach=AIM_MAX_REACH):
+        """Box the finger points AT: the box under the tip, or else the first box
+        straight ahead of it (along knuckle -> tip), up to AIM_REACH finger lengths
+        and max_reach of the picture width away. -1 if none."""
+        b = self.hit(tip[0], tip[1], frame_w, frame_h)
+        if b >= 0 or base is None:
+            return b
+        dx, dy = tip[0] - base[0], tip[1] - base[1]
+        flen = math.hypot(dx, dy)
+        if flen < 4:
+            return -1
+        reach = min(AIM_REACH * flen, max_reach * frame_w)
+        steps = max(1, int(reach / 6))
+        for k in range(1, steps + 1):
+            f = reach * k / steps / flen
+            b = self.hit(tip[0] + dx * f, tip[1] + dy * f, frame_w, frame_h)
+            if b >= 0:
+                return b
         return -1
 
     def load(self, path):

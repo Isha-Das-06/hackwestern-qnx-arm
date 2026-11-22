@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1420" height="850" viewBox="0 0 1420 850" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker>
+    <marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#b91c1c"/></marker>
+  </defs>
+  <rect width="1420" height="850" fill="#ffffff"/>
+  <text x="40" y="52" font-size="30" font-weight="700" fill="#0f172a">System architecture</text>
+  <text x="40" y="84" font-size="17" fill="#475569">Everything in the control path runs on the Raspberry Pi under QNX 8.0. The cloud only keeps history.</text>
+
+  <!-- QNX box -->
+  <rect x="40" y="110" width="930" height="560" rx="16" fill="#f8fafc" stroke="#0f172a" stroke-width="2.5"/>
+  <text x="62" y="144" font-size="20" font-weight="700" fill="#0f172a">Raspberry Pi · QNX 8.0 (RTOS)</text>
+  <text x="62" y="168" font-size="14" fill="#475569">Each block is its own isolated QNX process. Higher priority always runs first.</text>
+
+  <!-- Supervisor -->
+  <rect x="300" y="190" width="420" height="100" rx="12" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/>
+  <text x="510" y="222" font-size="19" font-weight="700" text-anchor="middle" fill="#3b0764">Supervisor · priority 40</text>
+  <text x="510" y="248" font-size="14" text-anchor="middle" fill="#3b0764">Watches heartbeats · restarts crashed processes</text>
+  <text x="510" y="270" font-size="14" text-anchor="middle" fill="#3b0764">Reads e-stop · serves dashboard</text>
+
+  <!-- Vision -->
+  <rect x="70" y="370" width="260" height="150" rx="12" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/>
+  <text x="200" y="402" font-size="19" font-weight="700" text-anchor="middle" fill="#0c4a6e">Vision · priority 10</text>
+  <text x="200" y="430" font-size="14" text-anchor="middle" fill="#0c4a6e">Hand tracking (TensorFlow</text>
+  <text x="200" y="450" font-size="14" text-anchor="middle" fill="#0c4a6e">Lite, QNX tflite_runtime)</text>
+  <text x="200" y="474" font-size="14" text-anchor="middle" fill="#0c4a6e">Object classifier</text>
+  <text x="200" y="498" font-size="14" text-anchor="middle" fill="#0c4a6e">~9 frames per second</text>
+
+  <!-- Motion -->
+  <rect x="390" y="370" width="250" height="150" rx="12" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+  <text x="515" y="402" font-size="19" font-weight="700" text-anchor="middle" fill="#14532d">Motion · priority 30</text>
+  <text x="515" y="430" font-size="14" text-anchor="middle" fill="#14532d">Pick-and-place sequence</text>
+  <text x="515" y="452" font-size="14" text-anchor="middle" fill="#14532d">Joint limits · stall check</text>
+  <text x="515" y="474" font-size="14" text-anchor="middle" fill="#14532d">50 times a second</text>
+
+  <!-- Gripper -->
+  <rect x="700" y="370" width="250" height="150" rx="12" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+  <text x="825" y="402" font-size="19" font-weight="700" text-anchor="middle" fill="#78350f">Grip control · priority 30</text>
+  <text x="825" y="430" font-size="14" text-anchor="middle" fill="#78350f">Force loop, 100 times a second</text>
+  <text x="825" y="452" font-size="14" text-anchor="middle" fill="#78350f">Over-force back-off · slip check</text>
+  <text x="825" y="474" font-size="14" text-anchor="middle" fill="#78350f">Worst lateness under load:</text>
+  <text x="825" y="496" font-size="14" font-weight="700" text-anchor="middle" fill="#78350f">0.49 ms, 0 missed</text>
+
+  <!-- heartbeats -->
+  <path d="M200,370 L200,330 L400,330 L400,292" fill="none" stroke="#6d28d9" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#a)"/>
+  <line x1="515" y1="370" x2="515" y2="292" stroke="#6d28d9" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#a)"/>
+  <path d="M825,370 L825,330 L630,330 L630,292" fill="none" stroke="#6d28d9" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#a)"/>
+  <text x="700" y="322" font-size="13" fill="#6d28d9">heartbeats</text>
+
+  <!-- vision -> motion -->
+  <line x1="330" y1="445" x2="388" y2="445" stroke="#334155" stroke-width="2.5" marker-end="url(#a)"/>
+  <text x="359" y="436" font-size="13" text-anchor="middle" fill="#334155">PICK</text>
+  <!-- motion -> gripper -->
+  <line x1="640" y1="445" x2="698" y2="445" stroke="#334155" stroke-width="2.5" marker-end="url(#a)"/>
+  <text x="669" y="436" font-size="13" text-anchor="middle" fill="#334155">GRIP</text>
+
+  <!-- camera -->
+  <rect x="70" y="580" width="260" height="66" rx="10" fill="#ffffff" stroke="#0369a1" stroke-width="2"/>
+  <text x="200" y="608" font-size="16" font-weight="700" text-anchor="middle" fill="#0c4a6e">USB camera</text>
+  <text x="200" y="630" font-size="13" text-anchor="middle" fill="#0c4a6e">our C bridge on QNX camera API</text>
+  <line x1="200" y1="580" x2="200" y2="522" stroke="#334155" stroke-width="2.5" marker-end="url(#a)"/>
+
+  <!-- Outside the Pi: hardware -->
+  <text x="40" y="712" font-size="18" font-weight="700" fill="#0f172a">Hardware</text>
+  <rect x="390" y="725" width="250" height="70" rx="10" fill="#ffffff" stroke="#15803d" stroke-width="2"/>
+  <text x="515" y="755" font-size="16" font-weight="700" text-anchor="middle" fill="#14532d">2 × closed-loop steppers</text>
+  <text x="515" y="777" font-size="13" text-anchor="middle" fill="#14532d">lift + base · UART</text>
+  <line x1="515" y1="522" x2="515" y2="723" stroke="#334155" stroke-width="2.5" marker-end="url(#a)"/>
+
+  <rect x="700" y="725" width="270" height="70" rx="10" fill="#ffffff" stroke="#b45309" stroke-width="2"/>
+  <text x="835" y="752" font-size="16" font-weight="700" text-anchor="middle" fill="#78350f">Pico · servo gripper + force sensors</text>
+  <text x="835" y="774" font-size="13" text-anchor="middle" fill="#78350f">UART 200 Hz · freezes if QNX silent 100 ms</text>
+  <line x1="815" y1="522" x2="815" y2="723" stroke="#334155" stroke-width="2.5" marker-end="url(#a)"/>
+  <line x1="845" y1="723" x2="845" y2="522" stroke="#334155" stroke-width="2.5" marker-end="url(#a)"/>
+
+  <!-- E-stop -->
+  <rect x="1010" y="190" width="350" height="100" rx="12" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/>
+  <text x="1185" y="224" font-size="19" font-weight="700" text-anchor="middle" fill="#7f1d1d">E-stop button</text>
+  <text x="1185" y="250" font-size="14" text-anchor="middle" fill="#7f1d1d">Cuts motor power in hardware</text>
+  <text x="1185" y="272" font-size="14" text-anchor="middle" fill="#7f1d1d">Fail-safe wire: loose wire = stop</text>
+  <line x1="1008" y1="240" x2="722" y2="240" stroke="#b91c1c" stroke-width="2.5" marker-end="url(#r)"/>
+  <path d="M1362,240 L1395,240 L1395,825 L835,825 L835,799" fill="none" stroke="#b91c1c" stroke-width="2.5" marker-end="url(#r)"/>
+  <path d="M835,825 L515,825 L515,799" fill="none" stroke="#b91c1c" stroke-width="2.5" marker-end="url(#r)"/>
+  <text x="1100" y="816" font-size="13" text-anchor="middle" fill="#b91c1c">cuts motor + servo power</text>
+
+  <!-- Cloud -->
+  <rect x="1010" y="400" width="350" height="140" rx="12" fill="#f1f5f9" stroke="#64748b" stroke-width="2" stroke-dasharray="8 6"/>
+  <text x="1185" y="434" font-size="19" font-weight="700" text-anchor="middle" fill="#1e293b">Cloud history (optional)</text>
+  <text x="1185" y="462" font-size="14" text-anchor="middle" fill="#1e293b">Vultr server → Tiger Data</text>
+  <text x="1185" y="484" font-size="14" text-anchor="middle" fill="#1e293b">(TimescaleDB) · audit trail</text>
+  <text x="1185" y="512" font-size="13" text-anchor="middle" fill="#475569">Robot never waits on it</text>
+  <line x1="972" y1="470" x2="1008" y2="470" stroke="#64748b" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#a)"/>
+</svg>

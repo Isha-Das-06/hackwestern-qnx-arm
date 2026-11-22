@@ -135,7 +135,7 @@ tr:last-child td{border-bottom:0}
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const OBJ = { egg: "Egg", cup: "Cup", block: "Block" };
+const OBJ = { egg: "Pill bottle", cup: "Squeeze bottle", block: "Pills" };
 const STATUS = { done: "Finished", rejected: "Refused", cancelled: "Cancelled", "no-response": "No response" };
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 let hours = 24, timer = null;

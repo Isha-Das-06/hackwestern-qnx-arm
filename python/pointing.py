@@ -22,9 +22,10 @@ import cv2
 
 from cloud_sync import CloudSync
 from classifier import BLOCK, CUP, EGG, EMPTY, NAMES, UNKNOWN, PocketClassifier
+from fingertip import FingertipFinder
 from handtrack_tflite import HandTracker as TfliteHandTracker
 from logic import (AWAIT_CLEAR, CHOOSE_DEST, CLASSIFYING, DISPATCHED, DWELLING, FROM, IDLE,
-                   MIDDLE_MCP, REJECTED, TO, WRIST, PointerTracker, Selector, Tray, finger_bends,
+                   INDEX_MCP, MIDDLE_MCP, REJECTED, TO, WRIST, PointerTracker, Selector, Tray, finger_bends,
                    load_grip)
 from qnx_camera import QnxCamera, on_qnx
 
@@ -181,6 +182,8 @@ def main():
     ap.add_argument("--tracker", choices=["auto", "mediapipe", "tflite"], default="tflite",
                     help="hand tracker: tflite (default) = the QNX workshop models, same as "
                          "on the Pi; mediapipe = laptop only; auto = mediapipe if installed")
+    ap.add_argument("--no-fingertip", action="store_true",
+                    help="turn off the fingertip backup (finger seen without its palm)")
     ap.add_argument("--res", default="640x480",
                     help="QNX camera size, e.g. 1280x720 for widescreen (default 640x480)")
     ap.add_argument("--arm", action="store_true",
@@ -210,6 +213,9 @@ def main():
 
     tracker = make_tracker(args.tracker)
     print(f"hand tracker: {tracker.name}")
+    tipfinder = None if args.no_fingertip else FingertipFinder()
+    if tipfinder:
+        print("fingertip backup: on (a finger reaching in counts even if the palm is out of view)")
 
     if args.camera == "qnx" or (args.camera == "auto" and qnx):
         unit = 4 if args.cam is None else args.cam
@@ -333,6 +339,13 @@ def main():
 
         # ---- hands: 21 (x, y) pixels + 21 (x, y, z) 3D points per hand ----
         hands, worlds = tracker.detect(frame)
+        # Palm outside the picture? A finger reaching in from the edge still counts.
+        # (Runs every frame so it keeps learning the empty scene.)
+        if tipfinder is not None:
+            boxes_px = [tray.rect_px(i, W, H) for i in range(len(tray))]
+            tip_pts = tipfinder.detect(frame, boxes_px)
+            if not hands and tip_pts is not None:
+                hands, worlds = [tip_pts], [None]
         hand_ms.append(now_ms() - t)
 
         # biggest hand on screen is the one pointing
@@ -344,7 +357,9 @@ def main():
 
         tip, pointing = pointer.update(primary, t, primary_world)
         bends = finger_bends(primary_world) if primary_world else None
-        over = tray.hit(tip[0], tip[1], W, H) if tip else -1  # fingertip is over this pocket
+        # box the finger is over, or points at from a little away (along the index finger)
+        base = primary[INDEX_MCP] if primary else None
+        over = tray.aim(tip, base, W, H) if tip else -1
         # Only a pointing hand selects; a hand placing/holding an object doesn't.
         hover = over if (pointing or args.no_point_check) else -1
 
@@ -353,6 +368,8 @@ def main():
         for i in range(len(tray)):
             r = tray.rect_px(i, W, H)
             occ = any(hand_covers(h, r, W, H) for h in hands)
+            if not occ and tipfinder is not None:
+                occ = tipfinder.covers(r)  # rest of a hand reaching in is still over the box
             occluded.append(occ)
             if not occ and r[2] > r[0] and r[3] > r[1]:
                 label, conf, frac, _ = clf.predict(i, frame[r[1]:r[3], r[0]:r[2]])
