@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PickVision — Operator console</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="mark"><svg viewBox="0 0 16 16" fill="none" stroke="#0A0C10" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 13V6.5a1.5 1.5 0 0 1 3 0V9M6 9V3.5a1.5 1.5 0 0 1 3 0V9M9 9V6a1.5 1.5 0 0 1 3 0v4.5A3.5 3.5 0 0 1 8.5 14H7"/></svg></div>
+    <b>PickVision</b>
+  </div>
+  <div class="spacer"></div>
+  <span class="sys" id="sys">Connecting…</span>
+  <span class="pill" id="link" title="Connection to the robot arm controller">Robot link</span>
+  <span class="live" id="lamp" data-state="wait"><span class="dot"></span><span id="lamp-text">Connecting</span></span>
+  <div class="tools">
+    <button class="icon" id="sound" aria-pressed="false" title="Sound (S)">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8h3l4-3v10l-4-3H3z" fill="currentColor"/><path class="wave" d="M13 7.5a3.5 3.5 0 0 1 0 5M15 5.5a6.5 6.5 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path class="mute" d="M13 8l4 4M17 8l-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <span class="sr">Sound</span>
+    </button>
+    <button class="icon" id="help" title="Keyboard shortcuts (?)"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 8a2 2 0 1 1 2.8 1.8c-.5.3-.8.7-.8 1.2v.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14" r="1" fill="currentColor"/></svg><span class="sr">Shortcuts</span></button>
+    <button class="icon" id="present" title="Presentation mode (F)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span class="sr">Presentation mode</span></button>
+  </div>
+  <button class="btn" id="setup-toggle" aria-expanded="false">Set up</button>
+</header>
+
+<main class="page">
+  <section class="status" id="status" data-tone="idle" aria-live="polite">
+    <div class="badge" id="badge">1</div>
+    <div class="status-text">
+      <h1 id="instr">Connecting to the robot</h1>
+      <p id="detail">The console updates by itself once the camera is running.</p>
+    </div>
+    <div class="status-side">
+      <div class="count" id="count" hidden><b id="count-n">10</b><span>seconds left</span></div>
+      <button class="btn btn-ghost" id="cancel" hidden>Cancel move</button>
+    </div>
+    <div class="hold" aria-hidden="true"><span id="hold"></span></div>
+  </section>
+
+  <div class="grid">
+    <section class="camera">
+      <div class="cam" id="frame">
+        <img id="cam" alt="Live camera view of the workspace" src="/stream">
+        <canvas id="overlay" aria-hidden="true"></canvas>
+        <p class="cam-offline" id="offline" hidden>Camera picture lost. Reconnecting…</p>
+        <div class="perf-chip" id="perf-chip"></div>
+      </div>
+    </section>
+
+    <aside class="col" id="side">
+      <section class="panel">
+        <div class="ph"><h2>Boxes</h2></div>
+        <ul class="boxes" id="boxes"></ul>
+      </section>
+
+      <section class="panel">
+        <div class="ph"><h2>Real-time on the robot</h2><span class="meta" id="perf-os"></span></div>
+        <div class="metrics">
+          <div class="m"><div class="k">Frame rate</div><div class="v num"><span id="t-fps">–</span><small>fps</small></div><svg class="spark" id="sp-fps" viewBox="0 0 100 22" preserveAspectRatio="none"><polyline fill="none" stroke="#3B82F6" stroke-width="1.5"/></svg></div>
+          <div class="m"><div class="k">Hand model</div><div class="v num"><span id="t-hand">–</span><small>ms</small></div><svg class="spark" id="sp-hand" viewBox="0 0 100 22" preserveAspectRatio="none"><polyline fill="none" stroke="#9AA3B2" stroke-width="1.5"/></svg></div>
+        </div>
+        <details class="details" id="details">
+          <summary>Details</summary>
+          <dl class="kv">
+            <div><dt>Whole frame</dt><dd class="num"><span id="t-frame">–</span> ms</dd></div>
+            <div><dt>Slowest, last 10 s</dt><dd class="num"><span id="t-worst">–</span> ms</dd></div>
+            <div><dt>Robot link</dt><dd id="d-link">–</dd></div>
+            <div><dt>Last command</dt><dd class="num" id="d-time">–</dd></div>
+          </dl>
+          <div class="code" id="d-cmd">No command sent yet</div>
+          <ul class="conf-list" id="d-boxes"></ul>
+        </details>
+      </section>
+    </aside>
+
+    <aside class="col" id="setup" hidden>
+      <ol class="checklist">
+        <li class="panel task" id="task-boxes">
+          <div class="task-h"><span class="tick" aria-hidden="true"></span><h2>Mark the 4 boxes</h2><span class="task-state" id="ts-boxes"></span></div>
+          <p class="note">Drag a rectangle around each box on the camera picture.</p>
+          <div class="row">
+            <button class="btn" id="draw">Draw all 4</button>
+            <span class="row-label">Redraw one</span>
+            <div class="seg" id="redraw"></div>
+          </div>
+        </li>
+        <li class="panel task" id="task-bg">
+          <div class="task-h"><span class="tick" aria-hidden="true"></span><h2>Take an empty-tray photo</h2><span class="task-state" id="ts-bg"></span></div>
+          <p class="note">Empty every box and keep hands out of view. The robot compares against this photo to tell if a box is empty.</p>
+          <p class="warn-line" id="bg-warn" hidden>Your hand is in view. Move it away first.</p>
+          <button class="btn" id="bg">Take photo</button>
+        </li>
+        <li class="panel task" id="task-teach">
+          <div class="task-h"><span class="tick" aria-hidden="true"></span><h2>Teach the objects</h2><span class="task-state" id="ts-teach"></span></div>
+          <p class="note">Put one object in any box, then press Teach. Do it about 5 times per object, moving it a little each time.</p>
+          <ul class="teach" id="teach"></ul>
+        </li>
+      </ol>
+      <section class="panel extras">
+        <label class="check"><input type="checkbox" id="mask"> Highlight what counts as an object</label>
+        <button class="link-danger" id="clear">Clear all taught examples</button>
+      </section>
+      <section class="panel">
+        <div class="ph"><h2>Messages</h2></div>
+        <ol class="log" id="log"></ol>
+      </section>
+    </aside>
+  </div>
+
+  <section class="strip" id="strip">
+    <div class="stats" id="stats">No moves yet</div>
+    <ol class="chips" id="chips"></ol>
+    <button class="btn btn-ghost" id="all-moves">All moves</button>
+  </section>
+</main>
+
+<dialog id="moves-dlg" aria-labelledby="moves-title">
+  <div class="dlg-h"><h2 id="moves-title">All moves</h2><button class="icon" data-close title="Close (Esc)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span class="sr">Close</span></button></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Time</th><th>Object</th><th>From</th><th>To</th><th>Grip range</th><th>Took</th><th>Result</th></tr></thead>
+      <tbody id="moves"></tbody>
+    </table>
+  </div>
+</dialog>
+
+<dialog id="help-dlg" aria-labelledby="help-title">
+  <div class="dlg-h"><h2 id="help-title">Keyboard shortcuts</h2><button class="icon" data-close title="Close (Esc)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span class="sr">Close</span></button></div>
+  <dl class="keys">
+    <div><dt><kbd>F</kbd></dt><dd>Presentation mode (full screen)</dd></div>
+    <div><dt><kbd>S</kbd></dt><dd>Sound on or off</dd></div>
+    <div><dt><kbd>Esc</kbd></dt><dd>Cancel the move, or leave presentation mode</dd></div>
+    <div><dt><kbd>C</kbd></dt><dd>Draw all 4 boxes</dd></div>
+    <div><dt><kbd>B</kbd></dt><dd>Take the empty-tray photo</dd></div>
+    <div><dt><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></dt><dd>Teach egg, cup or block</dd></div>
+    <div><dt><kbd>M</kbd></dt><dd>Highlight what counts as an object</dd></div>
+    <div><dt><kbd>?</kbd></dt><dd>This list</dd></div>
+  </dl>
+</dialog>
+
+<script src="/app.js"></script>
+</body>
+</html>

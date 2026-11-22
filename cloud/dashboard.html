@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PickVision History</title>
+<style>
+:root{
+  --bg:#0B0D10; --panel:#12151A; --panel-2:#181C22; --line:#252A32; --line-2:#2F353F;
+  --text:#E9ECF0; --muted:#A1A9B6; --faint:#6B7380;
+  --s1:#3B82F6; --s2:#B8780F;            /* validated pair on --panel (dataviz validator) */
+  --good:#22C55E; --bad:#F87171;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+.num{font-variant-numeric:tabular-nums}
+header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:18px 28px;border-bottom:1px solid var(--line)}
+header h1{font-size:18px;margin:0;font-weight:650;letter-spacing:-.01em}
+header .sub{color:var(--muted);font-size:13.5px}
+.grow{flex:1}
+.chip{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);border:1px solid var(--line-2);border-radius:999px;padding:5px 12px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint)}
+.chip[data-on="1"] .dot{background:var(--good);box-shadow:0 0 0 3px rgba(34,197,94,.18)}
+.seg{display:flex}
+.seg button{font:inherit;font-size:13px;font-weight:550;padding:7px 13px;border:1px solid var(--line-2);background:var(--panel-2);color:var(--muted);cursor:pointer}
+.seg button+button{border-left:0}
+.seg button:first-child{border-radius:9px 0 0 9px}
+.seg button:last-child{border-radius:0 9px 9px 0}
+.seg button[aria-pressed="true"]{background:var(--text);color:#0B0D10;border-color:var(--text)}
+main{padding:22px 28px 40px;display:grid;gap:18px;max-width:1400px;margin:0 auto}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+.panel h2{font-size:14.5px;font-weight:600;margin:0}
+.panel .ph{display:flex;align-items:baseline;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.panel .ph .note{color:var(--faint);font-size:12.5px}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px}
+.kpi .lab{color:var(--muted);font-size:13px}
+.kpi .val{font-size:34px;font-weight:650;letter-spacing:-.02em;margin-top:4px}
+.kpi .val small{font-size:15px;color:var(--muted);font-weight:500;margin-left:4px}
+.kpi .foot{color:var(--faint);font-size:12.5px;margin-top:2px}
+.grid2{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:18px}
+.legend{display:flex;gap:16px;font-size:12.5px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.legend i.ln{height:2px;width:14px;border-radius:1px}
+.legend i.dash{height:0;width:14px;border-top:2px dashed var(--muted);background:none}
+.chart{position:relative}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.axis text{fill:var(--faint);font-size:11px}
+.grid line{stroke:var(--line);stroke-width:1}
+.tip{position:absolute;pointer-events:none;background:#05070A;border:1px solid var(--line-2);border-radius:9px;padding:8px 10px;font-size:12.5px;line-height:1.5;white-space:nowrap;opacity:0;transform:translate(-50%,-100%);margin-top:-10px;transition:opacity .08s}
+.tip b{font-weight:600}
+.tip .k{color:var(--muted)}
+.empty{color:var(--faint);font-size:13.5px;padding:30px 0;text-align:center}
+.objs{display:grid;gap:12px}
+.obj{display:grid;grid-template-columns:56px 1fr 92px;gap:12px;align-items:center;font-size:14px}
+.obj .bar{height:10px;background:var(--panel-2);border-radius:5px;overflow:hidden}
+.obj .bar span{display:block;height:100%;background:var(--s1);border-radius:5px}
+.obj .r{color:var(--muted);font-size:13px;text-align:right}
+.reasons{margin:14px 0 0;padding:0;list-style:none;display:grid;gap:6px;font-size:13px;color:var(--muted)}
+.reasons li{display:flex;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding-top:6px}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{color:var(--faint);font-weight:500;text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:8px;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+.st{display:inline-flex;align-items:center;gap:6px}
+.st::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--faint)}
+.st[data-s="done"]::before{background:var(--good)}
+.st[data-s="rejected"]::before,.st[data-s="no-response"]::before{background:var(--bad)}
+.why{color:var(--faint)}
+.tiger{color:var(--faint);font-size:12.5px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.tiger span{border:1px solid var(--line-2);border-radius:6px;padding:2px 8px}
+.tiger span[data-on="0"]{opacity:.45;text-decoration:line-through}
+@media (max-width:900px){
+  header,main{padding-left:16px;padding-right:16px}
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .grid2{grid-template-columns:1fr}
+  .kpi .val{font-size:28px}
+  .hide-sm{display:none}
+}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>PickVision · Robot history</h1>
+    <div class="sub">The robot runs offline on QNX. This page only keeps its history.</div>
+  </div>
+  <div class="grow"></div>
+  <span class="chip" id="seen" data-on="0"><span class="dot"></span><span id="seen-t">Waiting for the robot…</span></span>
+  <div class="seg" id="range" role="group" aria-label="Time range">
+    <button data-h="1">1 h</button><button data-h="6">6 h</button><button data-h="24" aria-pressed="true">24 h</button><button data-h="168">7 d</button>
+  </div>
+</header>
+
+<main>
+  <section class="panel kpis">
+    <div class="kpi"><div class="lab">Moves</div><div class="val num" id="k-moves">–</div><div class="foot" id="k-moves-f">&nbsp;</div></div>
+    <div class="kpi"><div class="lab">Finished</div><div class="val num" id="k-rate">–</div><div class="foot" id="k-rate-f">&nbsp;</div></div>
+    <div class="kpi"><div class="lab">Reaction time (median)</div><div class="val num" id="k-react">–</div><div class="foot" id="k-react-f">hand leaves box → command sent</div></div>
+    <div class="kpi"><div class="lab">Frames on time</div><div class="val num" id="k-ontime">–</div><div class="foot" id="k-ontime-f">under the 200 ms budget</div></div>
+  </section>
+
+  <div class="grid2">
+    <section class="panel">
+      <div class="ph"><h2>Moves over time</h2><span class="note" id="bucket-note"></span><div class="grow"></div>
+        <div class="legend"><span><i style="background:var(--s1)"></i>Finished</span><span><i style="background:var(--s2)"></i>Didn't finish</span></div></div>
+      <div class="chart" id="c-moves"></div>
+    </section>
+    <section class="panel">
+      <div class="ph"><h2>By object</h2><span class="note">finished / tried</span></div>
+      <div class="objs" id="objs"></div>
+      <ul class="reasons" id="reasons"></ul>
+    </section>
+  </div>
+
+  <section class="panel">
+    <div class="ph"><h2>Frame time on the Pi</h2><span class="note">whole vision loop, per frame</span><div class="grow"></div>
+      <div class="legend"><span><i class="ln" style="background:var(--s1)"></i>Average</span><span><i class="ln" style="background:var(--s2)"></i>Worst</span><span><i class="dash"></i>200 ms budget</span></div></div>
+    <div class="chart" id="c-perf"></div>
+  </section>
+
+  <section class="panel">
+    <div class="ph"><h2>Latest moves</h2></div>
+    <table>
+      <thead><tr><th>When</th><th>Object</th><th>Move</th><th>Result</th><th class="hide-sm">Reaction</th><th class="hide-sm">Robot</th></tr></thead>
+      <tbody id="recent"></tbody>
+    </table>
+  </section>
+
+  <div class="tiger" id="tiger">Stored in Tiger Data:
+    <span data-f="timescale">hypertables</span><span data-f="aggregate">continuous aggregate (per-minute health)</span><span data-f="compression">compression after 7 days</span>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const OBJ = { egg: "Egg", cup: "Cup", block: "Block" };
+const STATUS = { done: "Finished", rejected: "Refused", cancelled: "Cancelled", "no-response": "No response" };
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+let hours = 24, timer = null;
+try { hours = +localStorage.getItem("pv-hist-h") || 24; } catch {}
+
+function ago(t, now) {
+  const s = Math.max(0, (now - t) / 1000);
+  return s < 60 ? `${Math.round(s)} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago`
+    : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`;
+}
+const fmtTime = (d, h) => h > 48 ? d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + d.toLocaleTimeString([], { hour: "2-digit" })
+  : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+// axis top that splits into 4 round ticks (e.g. 240 -> 300: 75/150/225/300)
+function niceMax(v) {
+  if (v <= 0) return 4;
+  const p = 10 ** Math.floor(Math.log10(v)), n = v / p;
+  return [1, 1.2, 1.6, 2, 2.4, 3, 4, 5, 6, 8, 10].find(s => s >= n - 1e-9) * p;
+}
+const countMax = v => Math.max(4, Math.ceil(v / 4) * 4);  // whole-number ticks for counts
+
+// ------------------------------------------------------------------ chart scaffolding
+function frame(el, H = 220) {
+  const W = Math.max(280, el.clientWidth), m = { l: 50, r: 12, t: 10, b: 26 };
+  return { W, H, m, iw: W - m.l - m.r, ih: H - m.t - m.b };
+}
+function tipFor(el) {
+  let t = el.querySelector(".tip");
+  if (!t) { t = document.createElement("div"); t.className = "tip"; el.appendChild(t); }
+  return t;
+}
+function yAxis(f, max, unit = "") {
+  let s = "";
+  for (let i = 0; i <= 4; i++) {
+    const v = max * i / 4, y = f.m.t + f.ih - f.ih * i / 4;
+    s += `<g class="grid"><line x1="${f.m.l}" x2="${f.W - f.m.r}" y1="${y}" y2="${y}"/></g>
+          <g class="axis"><text x="${f.m.l - 8}" y="${y + 4}" text-anchor="end">${Math.round(v)}${unit}</text></g>`;
+  }
+  return s;
+}
+function xLabels(f, ts, x) {
+  const n = ts.length, step = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(f.iw / 90))));
+  let s = "";
+  for (let i = 0; i < n; i += step) s += `<g class="axis"><text x="${x(i)}" y="${f.H - 6}" text-anchor="middle">${fmtTime(ts[i], hours)}</text></g>`;
+  return s;
+}
+
+// stacked bars: finished (bottom) + didn't finish (top), 2px surface gap between
+function drawMoves(rows) {
+  const el = $("c-moves");
+  if (!rows.length) { el.innerHTML = `<div class="empty">No moves in this time range yet.</div>`; return; }
+  const f = frame(el), ts = rows.map(r => new Date(r.t));
+  const max = countMax(Math.max(...rows.map(r => r.done + r.not_done)));
+  const slot = f.iw / rows.length, bw = Math.max(3, Math.min(28, slot * .7));
+  const x = i => f.m.l + slot * (i + .5), y = v => f.m.t + f.ih - f.ih * v / max;
+  let bars = "";
+  rows.forEach((r, i) => {
+    const x0 = x(i) - bw / 2, base = f.m.t + f.ih, h1 = f.ih * r.done / max, h2 = f.ih * r.not_done / max;
+    if (h1 > 0) bars += `<path d="${bar(x0, base - h1, bw, h1, h2 > 0 ? 0 : 4)}" fill="${css("--s1")}"/>`;
+    // top segment, leaving a 2px surface gap above the bottom one
+    if (h2 > 0) bars += `<path d="${bar(x0, base - h1 - h2, bw, Math.max(0, h2 - (h1 > 0 ? 2 : 0)), 4)}" fill="${css("--s2")}"/>`;
+    bars += `<rect x="${f.m.l + slot * i}" y="${f.m.t}" width="${slot}" height="${f.ih}" fill="transparent" data-i="${i}"/>`;
+  });
+  el.innerHTML = `<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Moves over time, finished and not finished">${yAxis(f, max)}${bars}${xLabels(f, ts, x)}</svg>`;
+  const tip = tipFor(el);
+  el.querySelectorAll("rect[data-i]").forEach(r => {
+    r.addEventListener("mouseenter", () => {
+      const d = rows[+r.dataset.i];
+      tip.innerHTML = `<b>${fmtTime(ts[+r.dataset.i], hours)}</b><br><span class="k">Finished</span> ${d.done} · <span class="k">Didn't finish</span> ${d.not_done}`;
+      tip.style.left = (x(+r.dataset.i) / f.W * el.clientWidth) + "px";
+      tip.style.top = (y(d.done + d.not_done) / f.H * el.clientHeight) + "px"; tip.style.opacity = 1;
+    });
+    r.addEventListener("mouseleave", () => tip.style.opacity = 0);
+  });
+}
+// a bar with rounded top corners only (data end), square at the baseline
+function bar(x, y, w, h, r) {
+  r = Math.min(r, w / 2, h);
+  return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
+}
+
+// two lines in the same unit (ms) on one axis + the budget line; crosshair tooltip
+function drawPerf(rows) {
+  const el = $("c-perf");
+  rows = rows.filter(r => r.frame_ms != null);
+  if (!rows.length) { el.innerHTML = `<div class="empty">No health samples yet. The Pi sends one every 10 seconds while it runs.</div>`; return; }
+  const f = frame(el, 200), ts = rows.map(r => new Date(r.t));
+  const max = niceMax(1.1 * Math.max(220, ...rows.map(r => r.worst_ms || 0)));  // 10% headroom
+  const x = i => rows.length === 1 ? f.m.l + f.iw / 2 : f.m.l + f.iw * i / (rows.length - 1);
+  const y = v => f.m.t + f.ih - f.ih * v / max;
+  const path = k => rows.map((r, i) => r[k] == null ? "" : `${i ? "L" : "M"}${x(i).toFixed(1)},${y(r[k]).toFixed(1)}`).join("");
+  const by = y(200);
+  el.innerHTML = `<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="Average and worst frame time">
+    ${yAxis(f, max, " ms")}
+    <line x1="${f.m.l}" x2="${f.W - f.m.r}" y1="${by}" y2="${by}" stroke="${css("--muted")}" stroke-width="1.5" stroke-dasharray="5 5"/>
+    <path d="${path("worst_ms")}" fill="none" stroke="${css("--s2")}" stroke-width="2" stroke-linejoin="round"/>
+    <path d="${path("frame_ms")}" fill="none" stroke="${css("--s1")}" stroke-width="2" stroke-linejoin="round"/>
+    <line id="xh" x1="0" x2="0" y1="${f.m.t}" y2="${f.m.t + f.ih}" stroke="${css("--line-2")}" stroke-width="1" opacity="0"/>
+    <circle id="d1" r="4.5" fill="${css("--s1")}" stroke="${css("--panel")}" stroke-width="2" opacity="0"/>
+    <circle id="d2" r="4.5" fill="${css("--s2")}" stroke="${css("--panel")}" stroke-width="2" opacity="0"/>
+    ${xLabels(f, ts, x)}
+    <rect id="hit" x="${f.m.l}" y="${f.m.t}" width="${f.iw}" height="${f.ih}" fill="transparent"/></svg>`;
+  const svg = el.querySelector("svg"), tip = tipFor(el), xh = svg.querySelector("#xh"),
+    d1 = svg.querySelector("#d1"), d2 = svg.querySelector("#d2");
+  const show = on => [xh, d1, d2].forEach(n => n.setAttribute("opacity", on ? 1 : 0));
+  svg.querySelector("#hit").addEventListener("mousemove", e => {
+    const b = svg.getBoundingClientRect(), px = (e.clientX - b.left) / b.width * f.W;
+    const i = Math.max(0, Math.min(rows.length - 1, Math.round(rows.length === 1 ? 0 : (px - f.m.l) / f.iw * (rows.length - 1))));
+    const r = rows[i];
+    xh.setAttribute("x1", x(i)); xh.setAttribute("x2", x(i));
+    d1.setAttribute("cx", x(i)); d1.setAttribute("cy", y(r.frame_ms));
+    d2.setAttribute("cx", x(i)); d2.setAttribute("cy", y(r.worst_ms ?? r.frame_ms));
+    show(true);
+    tip.innerHTML = `<b>${fmtTime(ts[i], hours)}</b><br><span class="k">Average</span> ${Math.round(r.frame_ms)} ms · <span class="k">Worst</span> ${Math.round(r.worst_ms ?? 0)} ms<br><span class="k">On time</span> ${r.ontime_pct != null ? r.ontime_pct.toFixed(1) + "%" : "–"} · <span class="k">fps</span> ${r.fps != null ? r.fps.toFixed(1) : "–"}`;
+    tip.style.left = (x(i) / f.W * el.clientWidth) + "px";
+    tip.style.top = (y(Math.max(r.frame_ms, r.worst_ms ?? 0)) / f.H * el.clientHeight) + "px"; tip.style.opacity = 1;
+  });
+  svg.querySelector("#hit").addEventListener("mouseleave", () => { show(false); tip.style.opacity = 0; });
+}
+
+// ------------------------------------------------------------------ page
+let last = null;
+function render(d) {
+  last = d;
+  const now = new Date(d.now), k = d.kpi;
+  const seen = d.last_seen ? new Date(d.last_seen) : null, live = seen && now - seen < 30000;
+  $("seen").dataset.on = live ? 1 : 0;
+  $("seen-t").textContent = !seen ? "No data from the robot yet" : live ? "Robot online" : `Robot last seen ${ago(seen, now)}`;
+
+  $("k-moves").textContent = k.moves;
+  $("k-moves-f").textContent = k.last_move ? `last ${ago(new Date(k.last_move), now)}` : "none yet";
+  $("k-rate").innerHTML = k.moves ? `${Math.round(100 * k.done / k.moves)}<small>%</small>` : "–";
+  $("k-rate-f").textContent = k.moves ? `${k.done} of ${k.moves} moves` : " ";
+  $("k-react").innerHTML = k.react_p50 != null ? `${Math.round(k.react_p50)}<small>ms</small>` : "–";
+  $("k-react-f").textContent = k.react_p95 != null ? `95% under ${Math.round(k.react_p95)} ms` : "hand leaves box → command sent";
+  $("k-ontime").innerHTML = k.ontime_pct != null ? `${k.ontime_pct.toFixed(1)}<small>%</small>` : "–";
+  $("k-ontime-f").textContent = k.fps != null ? `under 200 ms · ${k.fps.toFixed(1)} fps avg` : "under the 200 ms budget";
+  $("bucket-note").textContent = `per ${d.bucket}`;
+
+  drawMoves(d.over_time);
+  drawPerf(d.perf);
+
+  const objs = ["egg", "cup", "block"].map(o => d.by_obj.find(r => r.obj === o) || { obj: o, moves: 0, done: 0 });
+  $("objs").innerHTML = objs.map(o => `<div class="obj"><span>${OBJ[o.obj]}</span>
+      <div class="bar" title="${o.done} of ${o.moves}"><span style="width:${o.moves ? 100 * o.done / o.moves : 0}%"></span></div>
+      <span class="r num">${o.moves ? `${o.done} of ${o.moves}` : "no moves"}</span></div>`).join("");
+  $("reasons").innerHTML = d.reasons.length ? `<li style="border:0;padding:0;color:var(--faint)">Why moves didn't finish</li>` +
+    d.reasons.map(r => `<li><span>${esc(r.note || STATUS[r.status] || r.status)}</span><span class="num">${r.n}</span></li>`).join("") : "";
+
+  $("recent").innerHTML = d.recent.length ? d.recent.map(m => `<tr>
+      <td class="num">${ago(new Date(m.time), now)}</td><td>${OBJ[m.obj] || "–"}</td>
+      <td class="num">${m.from_box ? `Box ${m.from_box}` : "–"}${m.to_box ? ` → Box ${m.to_box}` : ""}</td>
+      <td><span class="st" data-s="${esc(m.status)}">${STATUS[m.status] || esc(m.status)}</span>${m.status !== "done" && m.note ? ` <span class="why">${esc(m.note)}</span>` : ""}</td>
+      <td class="num hide-sm">${m.react_ms != null ? m.react_ms + " ms" : "–"}</td>
+      <td class="num hide-sm">${m.robot_s != null ? m.robot_s + " s" : "–"}</td></tr>`).join("")
+    : `<tr><td colspan="6" class="empty">No moves yet. They show up here a few seconds after the robot does them.</td></tr>`;
+
+  document.querySelectorAll("#tiger [data-f]").forEach(s => s.dataset.on = d.features[s.dataset.f] ? 1 : 0);
+}
+
+async function load() {
+  clearTimeout(timer);
+  try {
+    const r = await fetch(`/api/summary?hours=${hours}`);
+    if (r.ok) render(await r.json());
+  } catch {}
+  timer = setTimeout(load, 10000);
+}
+function setRange(h) {
+  hours = h;
+  try { localStorage.setItem("pv-hist-h", h); } catch {}
+  document.querySelectorAll("#range button").forEach(b => b.setAttribute("aria-pressed", +b.dataset.h === h));
+  load();
+}
+$("range").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setRange(+b.dataset.h); });
+// redraw the charts whenever their width changes (first layout, window resize, phone rotate)
+let rt, widths = "";
+new ResizeObserver(() => {
+  const w = ["c-moves", "c-perf"].map(id => $(id).clientWidth).join();
+  if (w === widths) return;
+  widths = w; clearTimeout(rt); rt = setTimeout(() => last && render(last), 60);
+}).observe(document.querySelector("main"));
+setRange(hours);
+</script>
+</body>
+</html>

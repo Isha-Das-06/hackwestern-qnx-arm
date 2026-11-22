@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PickVision — Operator Console</title>
+<!-- DESIGN MOCKUP ONLY: static sample data, nothing is live. -->
+<style>
+:root{
+  --bg:#0A0C10; --panel:#11141A; --panel-2:#161A21; --line:#222833; --line-2:#2C3340;
+  --text:#E7EAEE; --muted:#8A93A3; --faint:#5C6573;
+  --blue:#3B82F6; --blue-soft:rgba(59,130,246,.14);
+  --amber:#F5A524; --amber-soft:rgba(245,165,36,.14);
+  --green:#22C55E; --green-soft:rgba(34,197,94,.12);
+  --red:#EF4444; --red-soft:rgba(239,68,68,.12);
+  --r:10px;
+  --font:"Inter","Segoe UI",-apple-system,"Helvetica Neue",Roboto,Arial,sans-serif;
+  --mono:"JetBrains Mono","Cascadia Mono",Consolas,"SF Mono",monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;-webkit-font-smoothing:antialiased}
+.num{font-variant-numeric:tabular-nums}
+
+/* top bar */
+.topbar{height:60px;display:flex;align-items:center;gap:28px;padding:0 28px;border-bottom:1px solid var(--line);background:var(--panel)}
+.brand{display:flex;align-items:center;gap:10px}
+.mark{width:28px;height:28px;border-radius:7px;background:var(--text);display:grid;place-items:center}
+.mark svg{width:16px;height:16px}
+.brand b{font-size:15px;font-weight:600;letter-spacing:-.01em}
+.brand span{color:var(--faint);font-size:13px;padding-left:10px;border-left:1px solid var(--line-2)}
+.nav{display:flex;gap:4px;height:100%}
+.nav a{display:flex;align-items:center;padding:0 12px;color:var(--muted);text-decoration:none;font-size:13.5px;border-bottom:2px solid transparent;margin-bottom:-1px}
+.nav a.on{color:var(--text);border-bottom-color:var(--text)}
+.spacer{flex:1}
+.sys{display:flex;align-items:center;gap:18px;color:var(--muted);font-size:12.5px}
+.sys .sep{width:1px;height:18px;background:var(--line-2)}
+.live{display:flex;align-items:center;gap:8px;color:var(--text);font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
+
+/* layout */
+.page{max-width:1440px;margin:0 auto;padding:24px 28px 40px}
+.head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:20px}
+.head h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.02em}
+.head p{margin:4px 0 0;color:var(--muted);font-size:13.5px}
+.btn{font:inherit;font-size:13px;color:var(--text);background:var(--panel-2);border:1px solid var(--line-2);border-radius:8px;padding:8px 14px;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.btn:hover{border-color:#3A4252}
+.btn.primary{background:var(--text);color:#0A0C10;border-color:var(--text);font-weight:500}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:20px;align-items:start}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r)}
+.ph{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--line)}
+.ph h2{margin:0;font-size:13.5px;font-weight:600}
+.ph .meta{color:var(--faint);font-size:12px}
+.tag{font-size:11px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;padding:3px 8px;border-radius:5px}
+
+/* stepper */
+.stepper{display:flex;padding:16px 18px;gap:0;border-bottom:1px solid var(--line)}
+.st{flex:1;display:flex;align-items:center;gap:10px;color:var(--faint);font-size:13px;position:relative}
+.st:not(:last-child)::after{content:"";flex:1;height:1px;background:var(--line-2);margin:0 14px}
+.st i{width:24px;height:24px;border-radius:50%;border:1px solid var(--line-2);display:grid;place-items:center;font-style:normal;font-size:12px;flex:none}
+.st.done{color:var(--muted)} .st.done i{background:var(--green-soft);border-color:transparent;color:var(--green)}
+.st.now{color:var(--text);font-weight:500} .st.now i{background:var(--amber);border-color:var(--amber);color:#1A1203;font-weight:600}
+
+/* camera */
+.cam{position:relative;aspect-ratio:4/3;max-height:560px;width:100%;background:#0E1117;overflow:hidden;border-radius:0 0 var(--r) var(--r)}
+.cam svg.scene{position:absolute;inset:0;width:100%;height:100%}
+.zone{position:absolute;border-radius:8px;border:1.5px solid rgba(231,234,238,.28)}
+.zone .zl{position:absolute;top:-1px;left:-1px;font-size:11px;font-weight:600;padding:4px 8px;border-radius:7px 0 7px 0;background:rgba(10,12,16,.75);color:var(--muted);letter-spacing:.02em}
+.zone.from{border:2px solid var(--blue);background:var(--blue-soft)}
+.zone.from .zl{background:var(--blue);color:#fff}
+.zone.to{border:2px dashed var(--amber);background:var(--amber-soft)}
+.zone.to .zl{background:var(--amber);color:#1A1203}
+.banner{position:absolute;left:50%;top:18px;transform:translateX(-50%);background:rgba(10,12,16,.82);border:1px solid var(--line-2);border-radius:999px;padding:9px 18px;font-size:13.5px;display:flex;align-items:center;gap:10px;white-space:nowrap}
+.banner b{color:var(--amber);font-weight:600}
+.camfoot{position:absolute;left:14px;bottom:12px;right:14px;display:flex;justify-content:space-between;font-family:var(--mono);font-size:11.5px;color:rgba(231,234,238,.6)}
+.rec{display:flex;align-items:center;gap:7px}
+.rec::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--red)}
+
+/* right column */
+.col{display:flex;flex-direction:column;gap:20px}
+.rows .row{display:grid;grid-template-columns:34px 1fr auto;align-items:center;gap:12px;padding:13px 18px;border-bottom:1px solid var(--line)}
+.rows .row:last-child{border-bottom:0}
+.bx{width:34px;height:34px;border-radius:8px;background:var(--panel-2);border:1px solid var(--line-2);display:grid;place-items:center;font-size:12px;font-weight:600;color:var(--muted)}
+.row.from .bx{background:var(--blue);border-color:var(--blue);color:#fff}
+.row.to .bx{border:1.5px dashed var(--amber);color:var(--amber);background:var(--amber-soft)}
+.obj{font-size:14px;font-weight:500}
+.sub{font-size:12px;color:var(--faint);margin-top:2px}
+.conf{width:100%;height:3px;background:var(--line);border-radius:2px;margin-top:7px;overflow:hidden}
+.conf span{display:block;height:100%;background:var(--muted)}
+.row.from .conf span{background:var(--blue)}
+
+.metrics{display:grid;grid-template-columns:1fr 1fr}
+.m{padding:16px 18px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+.m:nth-child(2n){border-right:0} .m:nth-last-child(-n+2){border-bottom:0}
+.m .k{font-size:12px;color:var(--muted)}
+.m .v{font-size:22px;font-weight:600;letter-spacing:-.02em;margin-top:6px}
+.m .v small{font-size:12px;color:var(--faint);font-weight:400;margin-left:3px}
+.spark{display:block;margin-top:8px;width:100%;height:22px}
+
+.kv{padding:6px 18px 14px}
+.kv div{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+.kv div:last-child{border-bottom:0}
+.kv span{color:var(--muted)}
+.code{font-family:var(--mono);font-size:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:10px 12px;margin:0 18px 16px;color:#C9D1DC;overflow:auto;white-space:nowrap}
+
+/* activity */
+.act{margin-top:20px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-weight:500;color:var(--faint);font-size:12px;padding:11px 18px;border-bottom:1px solid var(--line)}
+td{padding:12px 18px;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+.ok{color:var(--green);background:var(--green-soft)}
+.bad{color:var(--red);background:var(--red-soft)}
+.mono{font-family:var(--mono);font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="mark"><svg viewBox="0 0 16 16" fill="none" stroke="#0A0C10" stroke-width="1.8" stroke-linecap="round"><path d="M3 13V6.5a1.5 1.5 0 0 1 3 0V9M6 9V3.5a1.5 1.5 0 0 1 3 0V9M9 9V6a1.5 1.5 0 0 1 3 0v4.5A3.5 3.5 0 0 1 8.5 14H7"/></svg></div>
+    <b>PickVision</b><span>Operator console</span>
+  </div>
+  <nav class="nav"><a class="on" href="#">Live</a><a href="#">Activity</a><a href="#">Calibration</a><a href="#">Training</a></nav>
+  <div class="spacer"></div>
+  <div class="sys">
+    <span>QNX 8.0 · Raspberry Pi 4B</span><div class="sep"></div>
+    <span class="num">Uptime 01:42:18</span><div class="sep"></div>
+    <span class="live"><span class="dot"></span>Live</span>
+  </div>
+</header>
+
+<main class="page">
+  <div class="head">
+    <div>
+      <h1>Live workspace</h1>
+      <p>Point at an object, then point where it should go. Hold each for one second.</p>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn">Cancel move</button>
+      <button class="btn primary">Emergency stop</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <section class="panel">
+      <div class="ph"><h2>Camera 1</h2><span class="meta num">USB · 640 × 480 · 9.1 fps</span></div>
+      <div class="stepper">
+        <div class="st done"><i>✓</i>Select object</div>
+        <div class="st now"><i>2</i>Select destination</div>
+        <div class="st"><i>3</i>Robot moving</div>
+        <div class="st"><i>4</i>Complete</div>
+      </div>
+      <div class="cam">
+        <svg class="scene" viewBox="0 0 640 480" preserveAspectRatio="none">
+          <defs>
+            <pattern id="g" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#161B23" stroke-width="1"/></pattern>
+          </defs>
+          <rect width="640" height="480" fill="#0E1117"/><rect width="640" height="480" fill="url(#g)"/>
+          <rect x="18" y="140" width="604" height="290" rx="14" fill="#151A22" stroke="#1F2630"/>
+          <circle cx="90" cy="285" r="38" fill="#B23A3A"/><circle cx="90" cy="285" r="26" fill="#6E1F1F"/>
+          <rect x="210" y="255" width="62" height="62" rx="4" fill="#C77A1E" transform="rotate(12 241 286)"/>
+          <circle cx="540" cy="300" r="26" fill="rgba(10,12,16,.55)" stroke="#2C3340" stroke-width="4"/>
+          <circle cx="540" cy="300" r="26" fill="none" stroke="#F5A524" stroke-width="4" stroke-linecap="round" stroke-dasharray="113 164" transform="rotate(-90 540 300)"/>
+          <circle cx="540" cy="300" r="6" fill="#F5A524"/>
+          <circle cx="540" cy="300" r="10" fill="none" stroke="#F5A524" stroke-opacity=".35" stroke-width="2"/>
+        </svg>
+        <div class="zone from" style="left:3%;top:31%;width:21%;height:56%"><span class="zl">BOX 1 · FROM</span></div>
+        <div class="zone" style="left:27%;top:31%;width:21%;height:56%"><span class="zl">BOX 2</span></div>
+        <div class="zone" style="left:51%;top:31%;width:21%;height:56%"><span class="zl">BOX 3</span></div>
+        <div class="zone to" style="left:75%;top:31%;width:22%;height:56%"><span class="zl">BOX 4 · TO</span></div>
+        <div class="banner"><b>Cup selected</b> Now point at the destination box</div>
+        <div class="camfoot"><span class="rec">LIVE</span><span class="num">hand: pointing · dwell 69%</span></div>
+      </div>
+    </section>
+
+    <aside class="col">
+      <section class="panel">
+        <div class="ph"><h2>Workspace</h2><span class="meta">4 boxes</span></div>
+        <div class="rows">
+          <div class="row from"><div class="bx">1</div><div><div class="obj">Cup</div><div class="sub num">94% confidence · grip 150–260</div><div class="conf"><span style="width:94%"></span></div></div><span class="tag" style="background:var(--blue-soft);color:var(--blue)">From</span></div>
+          <div class="row"><div class="bx">2</div><div><div class="obj">Block</div><div class="sub num">88% confidence · grip 300–600</div><div class="conf"><span style="width:88%"></span></div></div><span></span></div>
+          <div class="row"><div class="bx">3</div><div><div class="obj" style="color:var(--muted)">Empty</div><div class="sub">Available</div></div><span></span></div>
+          <div class="row to"><div class="bx">4</div><div><div class="obj" style="color:var(--muted)">Empty</div><div class="sub">Available</div></div><span class="tag" style="background:var(--amber-soft);color:var(--amber)">To</span></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="ph"><h2>Real-time performance</h2><span class="meta">on device</span></div>
+        <div class="metrics">
+          <div class="m"><div class="k">Frame rate</div><div class="v num">9.1<small>fps</small></div>
+            <svg class="spark" viewBox="0 0 100 22" preserveAspectRatio="none"><polyline fill="none" stroke="#3B82F6" stroke-width="1.5" points="0,12 10,10 20,11 30,9 40,12 50,10 60,8 70,11 80,9 90,10 100,9"/></svg></div>
+          <div class="m"><div class="k">Inference</div><div class="v num">90<small>ms</small></div>
+            <svg class="spark" viewBox="0 0 100 22" preserveAspectRatio="none"><polyline fill="none" stroke="#8A93A3" stroke-width="1.5" points="0,10 10,12 20,9 30,11 40,10 50,13 60,10 70,9 80,11 90,10 100,11"/></svg></div>
+          <div class="m"><div class="k">Palm detector</div><div class="v num">62<small>ms</small></div></div>
+          <div class="m"><div class="k">Hand landmarks</div><div class="v num">28<small>ms</small></div></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="ph"><h2>Robot</h2><span class="tag ok">Ready</span></div>
+        <div class="kv">
+          <div><span>Controller</span>QNX control task</div>
+          <div><span>Last command</span><span class="num" style="color:var(--text)">08:36:04</span></div>
+        </div>
+        <div class="code">[pick] from=4 to=3 obj=cup grip=[150,260]</div>
+      </section>
+    </aside>
+  </div>
+
+  <section class="panel act">
+    <div class="ph"><h2>Activity</h2><span class="meta">Last 24 moves</span></div>
+    <table>
+      <thead><tr><th>Time</th><th>Object</th><th>From</th><th>To</th><th>Grip range</th><th>Duration</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">08:36:04</td><td>Cup</td><td>Box 4</td><td>Box 3</td><td class="num">150–260</td><td class="num">3.2 s</td><td><span class="tag ok">Completed</span></td></tr>
+        <tr><td class="mono">08:35:12</td><td>Block</td><td>Box 2</td><td>Box 1</td><td class="num">—</td><td class="num">—</td><td><span class="tag bad">Destination occupied</span></td></tr>
+        <tr><td class="mono">08:33:47</td><td>Block</td><td>Box 1</td><td>Box 2</td><td class="num">300–600</td><td class="num">3.4 s</td><td><span class="tag ok">Completed</span></td></tr>
+        <tr><td class="mono">08:31:20</td><td>Cup</td><td>Box 3</td><td>Box 4</td><td class="num">150–260</td><td class="num">3.1 s</td><td><span class="tag ok">Completed</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+</body>
+</html>
