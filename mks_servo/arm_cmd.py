@@ -5,6 +5,8 @@ arm_cmd: send one command to motion.py and print its reply.
     python3 arm_cmd.py home
     python3 arm_cmd.py pick 1 3 egg      (from pocket 1 to pocket 3, object egg)
     python3 arm_cmd.py jog lift 5        (lift +5 mm; base is in degrees)
+    python3 arm_cmd.py goto 2            (travel height, turn, lower into pocket 2; or goto home)
+    python3 arm_cmd.py goto 2 high       (same, but stay at travel height above it)
     python3 arm_cmd.py teach 2           (save the current pose as pocket 2)
     python3 arm_cmd.py calibrate         (seek both base stops, save the real travel)
     python3 arm_cmd.py pause | resume | stop | reset | reset-rehome
@@ -72,8 +74,9 @@ def main(argv):
         msg.update({"from": argv[1], "to": argv[2], "label": argv[3]})
     elif cmd == "JOG":
         msg.update({"joint": argv[1], "amount": float(argv[2])})
-    elif cmd == "TEACH":
+    elif cmd in ("TEACH", "GOTO"):
         msg["pocket"] = argv[1]
+        msg["high"] = "high" in argv[2:]
     elif cmd == "RESET-REHOME":
         msg = {"cmd": "RESET", "rehome": True}
     elif cmd == "FAULT":

@@ -29,7 +29,8 @@ Safety rules, each one sentence:
 
 Commands: one JSON object per UDP packet to 127.0.0.1:<cmd_port>; the reply
 is the status. See arm_cmd.py.
-  PICK {from, to, label}  HOME  JOG {joint, amount}  TEACH {pocket}  CALIBRATE
+  PICK {from, to, label}  HOME  JOG {joint, amount}  GOTO {pocket | "home"}
+  TEACH {pocket}  CALIBRATE
   PAUSE  RESUME  FAULT {reason}  STOP  RESET  STATUS
 Taught pockets and measured travel are saved in config/taught.json.
 Telemetry / heartbeat: status JSON to 127.0.0.1:<telemetry_port> at 10 Hz.
@@ -131,11 +132,11 @@ class Motion:
         for name, jc in self.cfg["joints"].items():
             if self.sim:
                 from sim_servo import FakeServo
-                # Fake hard stops: the lift's bottom at motor 0 (starting above
-                # it), the base at +-90 deg either side of where it starts.
+                # Fake hard stops: the lift between motor 0 and 334 deg (70 mm,
+                # starting low), the base at +-80 deg either side of where it starts.
                 m = FakeServo(jc["port"], name=name, firmware=jc["firmware"],
-                              hard_min=0.0 if name == "lift" else -90.0,
-                              hard_max=None if name == "lift" else 90.0,
+                              hard_min=0.0 if name == "lift" else -80.0,
+                              hard_max=334.0 if name == "lift" else 80.0,
                               start_deg=60.0 if name == "lift" else 0.0,
                               speedup=self.sim)
             else:
@@ -250,13 +251,14 @@ class Motion:
             for name, t in targets.items():
                 self.joints[name].check_limits(t)
         c = self.cfg
+        tol = {n: self.joints[n].cfg.get("tolerance", c["tolerance"]) for n in targets}
         if approach and self.homed:
             # Gear play: a joint with "approach" always finishes its move turning
             # that way, so the play is taken up the same way at every pocket.
             for name, t in targets.items():
                 j = self.joints[name]
                 side = j.cfg.get("approach")
-                if side and (t - j.deg()) * side < -c["tolerance"] * 0.5:
+                if side and (t - j.deg()) * side < -tol[name] * 0.5:
                     pre = t - side * j.cfg["approach_overshoot"]
                     if j.lo <= pre <= j.hi:
                         self.move_to(dict(targets, **{name: pre}), step, approach=False)
@@ -269,7 +271,7 @@ class Motion:
             for name, t in targets.items():
                 j = self.joints[name]
                 d = (t - j.deg()) * j.ratio         # motor degrees to go
-                if abs(d) / j.ratio > c["tolerance"] * 0.5:
+                if abs(d) / j.ratio > tol[name] * 0.5:
                     todo[name] = d
             if not todo:
                 return
@@ -278,7 +280,7 @@ class Motion:
         for name, t in targets.items():
             j = self.joints[name]
             err = abs(j.deg() - t)
-            if err > c["tolerance"]:
+            if err > tol[name]:
                 raise Fault(f"{name} missed its target by {err:.1f} {j.unit}")
 
     def _run_move(self, todo):
@@ -286,8 +288,12 @@ class Motion:
         k = c["deg_per_s_per_speed"]
         # Same arrival time for all joints: the slowest one sets the time. Short
         # corrections get at least min_move_s, so they run slowly and land.
-        t_move = max([abs(d) / (self.joints[n].cfg["max_speed"] * k) for n, d in todo.items()]
-                     + [c["min_move_s"]])
+        # A joint with "deg_per_s" turns at that fixed rate whatever the speed
+        # byte says (the base's V1.0 firmware: ~32-45 deg/s at every speed).
+        def seconds(n, d):
+            jc = self.joints[n].cfg
+            return abs(d) / (jc["deg_per_s"] if "deg_per_s" in jc else jc["max_speed"] * k)
+        t_move = max([seconds(n, d) for n, d in todo.items()] + [c["min_move_s"]])
         active = {}
         for name, d in todo.items():
             j = self.joints[name]
@@ -300,7 +306,7 @@ class Motion:
                 done0 = None
                 j.m.run(j.direction(d), speed)
             active[name] = {"d": d, "start": start, "done0": done0, "last": start,
-                            "speed": speed, "over": 0}
+                            "speed": speed, "over": 0, "prev": (time.monotonic(), start), "v": 0.0}
         deadline = time.monotonic() + t_move * c["timeout_factor"] + c["timeout_margin_s"]
         next_progress = time.monotonic() + c["progress_check_s"]
         next_stall = next_slip = time.monotonic() + 0.5
@@ -316,6 +322,7 @@ class Motion:
                 for name, a in active.items():
                     j = self.joints[name]
                     lag = j.m.shaft_error_degrees()
+                    a["lag"] = abs(lag)
                     a["over"] = a["over"] + 1 if abs(lag) >= j.cfg["lag_limit_motor_deg"] else 0
                     if a["over"] >= c["lag_polls"]:
                         for other in active:
@@ -330,10 +337,15 @@ class Motion:
                     pos = j.motor_deg()
                     moved = (pos - a["start"]) * (1 if a["d"] > 0 else -1)
                     if a["done0"] is None:
-                        # V1.0: stop a little early, by about what it turns before
-                        # the stop lands (never more than half the move).
-                        lead = min(c["v10_stop_lead_s"] * a["speed"] * c["deg_per_s_per_speed"],
-                                   abs(a["d"]) / 2)
+                        # V1.0 stops at its commanded angle, which runs `lag` ahead
+                        # of the shaft, and the stop lands one loop late: stop early
+                        # by both (measured each loop).
+                        t_prev, p_prev = a["prev"]
+                        now_t = time.monotonic()
+                        if now_t > t_prev:
+                            a["v"] = abs(pos - p_prev) / (now_t - t_prev)
+                        a["prev"] = (now_t, pos)
+                        lead = a.get("lag", 0.0) + c["v10_stop_lead_s"] * a["v"]
                         if moved >= abs(a["d"]) - lead:
                             j.m.stop()
                             del active[name]
@@ -358,6 +370,8 @@ class Motion:
                     next_slip = now + 0.1
                 if now > deadline:
                     raise Fault(f"move timed out ({', '.join(active)})")
+            if any(not self.joints[n].m.has_checksum for n in todo):
+                time.sleep(c["v10_settle_s"])     # V1.0 is still closing on its target
             return True
         except BaseException:
             self.hold_all()
@@ -387,12 +401,14 @@ class Motion:
         j.zero = j.motor_deg() - here * j.ratio
 
     def do_home(self):
-        """Lift first (down to its stop, then up to travel height, so the jaws
-        clear the docks), then the base, then the home pose."""
+        """Lift first (it seeks up, away from the docks), make sure the jaws are
+        at least at travel height, then the base, then the home pose."""
         self.state = "HOMING"
         self.homed = False
-        self.home_joint(self.joints["lift"])
-        self.move_to({"lift": self.cfg["travel_lift"]}, "lift to travel height")
+        lift = self.joints["lift"]
+        self.home_joint(lift)
+        if lift.deg() < self.cfg["travel_lift"]:
+            self.move_to({"lift": self.cfg["travel_lift"]}, "lift to travel height")
         self.home_joint(self.joints["base"])
         self.homed = True
         self.check_config()
@@ -460,6 +476,20 @@ class Motion:
         self.picks_done += 1
         return "done"
 
+    def do_goto(self, where, high=False):
+        """Go to a pocket (or "home") the way a pick does: travel height, turn,
+        lower (unless high: stay at travel height above it)."""
+        self.state = "GOTO"
+        if where == "home":
+            self.move_to(self.cfg["home_pose"], "home")
+            return
+        P, lift = self.cfg["pockets"], self.cfg["travel_lift"]
+        if self.joints["lift"].deg() < lift - self.cfg["tolerance"]:
+            self.move_to({"lift": lift}, "up to travel height")
+        self.move_to({"lift": lift, "base": P[where]["base"]}, f"to pocket {where}")
+        if not high:
+            self.move_to({"lift": P[where]["lift"]}, f"down into pocket {where}")
+
     def do_jog(self, name, amount):
         self.state = "JOG"
         j = self.joints[name]
@@ -492,6 +522,8 @@ class Motion:
                     self.last_result = self.do_pick(*job[1:])
                 elif job[0] == "JOG":
                     self.do_jog(*job[1:])
+                elif job[0] == "GOTO":
+                    self.do_goto(*job[1:])
                 elif job[0] == "CALIBRATE":
                     self.do_calibrate()
                     self.last_result = f"calibrated: {self.taught['travel']}"
@@ -587,6 +619,13 @@ class Motion:
             if not self.homed:
                 return "home first"
             self.jobs.put(("CALIBRATE",))
+        elif cmd == "GOTO":
+            where = str(msg.get("pocket"))
+            if not self.homed:
+                return "home first"
+            if where != "home" and where not in self.cfg["pockets"]:
+                return f"unknown pocket (have {sorted(self.cfg['pockets'])})"
+            self.jobs.put(("GOTO", where, bool(msg.get("high"))))
         elif cmd == "TEACH":
             pocket = str(msg.get("pocket"))
             if not self.homed:

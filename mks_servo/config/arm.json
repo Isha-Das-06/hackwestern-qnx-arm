@@ -5,33 +5,33 @@
   "joints": {
     "lift": {"port": "/dev/ser3", "addr": 224, "firmware": "1.1", "unit": "mm",
              "gear_ratio": 4.7746, "dir_bit_positive": 1, "stall_protection": false,
-             "max_speed": 20, "min": 0.0, "max": 65.0, "limit_margin": 0.5,
+             "max_speed": 20, "min": 0.0, "max": 68.0, "limit_margin": 0.5,
              "lag_limit_motor_deg": 10.0},
     "base": {"port": "/dev/ser5", "addr": 224, "firmware": "1.0", "unit": "deg",
-             "gear_ratio": 1.0, "dir_bit_positive": 1,
+             "gear_ratio": 1.0, "dir_bit_positive": 1, "deg_per_s": 38.0, "tolerance": 1.5,
              "max_speed": 10, "min": -80.0, "max": 80.0, "limit_margin": 3.0,
              "lag_limit_motor_deg": 10.0, "approach": 1, "approach_overshoot": 3.0}
   },
 
-  "_homing": "hard_stop = drive slowly into the stop until the motor lags (Surya's seek), then that spot is stop_at. marked_zero = the arm is parked at marked_at when motion starts. The lift's bottom stop is the pick height (pads meet a seated object). Base: switch to hard_stop once the V1.0 seek is tested; calibrate_both_ends measures its real travel (CALIBRATE).",
+  "_homing": "hard_stop = drive slowly into the stop until the motor lags (Surya's seek), then that spot is stop_at. marked_zero = the arm is parked at marked_at when motion starts. The lift has no clear spot to go all the way down (the jaws always meet a platform), so it seeks UP to its solid top stop, nominally 70 mm (CAD stroke). The base seeks its clockwise stop; its measured stop-to-stop range is 158.6 deg, so stop_at = -79.3. calibrate_both_ends re-measures the base range (CALIBRATE).",
   "homing": {
     "seek_speed": 8,
-    "lift": {"mode": "hard_stop", "toward": -1, "stop_at": 0.0,
+    "lift": {"mode": "hard_stop", "toward": 1, "stop_at": 70.0,
              "seek_error_deg": 10.0, "seek_max_motor_deg": 450.0},
-    "base": {"mode": "marked_zero", "marked_at": 0.0, "toward": -1, "stop_at": -82.0,
+    "base": {"mode": "hard_stop", "marked_at": 0.0, "toward": -1, "stop_at": -79.3,
              "seek_error_deg": 10.0, "seek_max_motor_deg": 220.0, "calibrate_both_ends": true}
   },
   "auto_home": false,
   "unhomed_jog_max": 5.0,
 
-  "_poses": "Pockets default to the CAD docks (145 mm radius): A -60, B -20, OUT +20, C +60 deg. Vision box N = pocket N; TEACH overrides these in taught.json.",
-  "home_pose": {"lift": 40.0, "base": 0.0},
-  "travel_lift": 40.0,
+  "_poses": "Pockets default to the CAD docks (145 mm radius): A -60, B -20, OUT +20, C +60 deg; lift heights are placeholders until taught. Vision box N = pocket N; TEACH overrides these in taught.json. travel_lift must clear the dock platforms while the base turns.",
+  "home_pose": {"lift": 50.0, "base": 0.0},
+  "travel_lift": 50.0,
   "pockets": {
-    "1": {"lift": 1.0, "base": -60.0},
-    "2": {"lift": 1.0, "base": -20.0},
-    "3": {"lift": 1.0, "base": 20.0},
-    "4": {"lift": 1.0, "base": 60.0}
+    "1": {"lift": 10.0, "base": -60.0},
+    "2": {"lift": 10.0, "base": -20.0},
+    "3": {"lift": 10.0, "base": 20.0},
+    "4": {"lift": 10.0, "base": 60.0}
   },
 
   "tolerance": 1.0,
@@ -42,7 +42,8 @@
   "timeout_margin_s": 2.0,
   "progress_check_s": 0.7,
   "min_progress_motor_deg": 1.0,
-  "v10_stop_lead_s": 0.02,
+  "v10_stop_lead_s": 0.07,
+  "v10_settle_s": 0.2,
   "min_move_s": 0.3,
   "grip_timeout_s": 6.0,
   "release_timeout_s": 4.0,
