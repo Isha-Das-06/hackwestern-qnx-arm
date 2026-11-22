@@ -15,6 +15,8 @@ The rules (each one sentence, for the judges):
   3. gripper_link or motion dies or goes silent -> FAULT: stop and hold.
      If motion is the one that died, we send the stop to the drivers ourselves.
   4. The Pico link goes stale -> FAULT (the Pico has frozen the servo itself).
+     motion faults by itself (something in the way, stall, timeout, slip) -> FAULT
+     here too, so the fault LED is on and RESET is needed.
   5. Vision dies or goes silent, or a hand is in view -> PAUSE motion (hold);
      RESUME once vision is back and no hand has been seen for hand_clear_s.
      Vision crashing is never a fault; it is restarted.
@@ -158,7 +160,7 @@ class Proc:
             self.p = subprocess.Popen(self.cmd, cwd=HERE, stdout=log, stderr=subprocess.STDOUT,
                                       stdin=subprocess.DEVNULL)
         self.started_t = time.monotonic()
-        self.last_t = None
+        self.last_t, self.last_msg = None, None
 
     def alive(self):
         return self.p is not None and self.p.poll() is None
@@ -219,6 +221,7 @@ class Supervisor:
         self.next_select_push = 0.0
         self.start_reads = 0
         self.console_starts = 0
+        self.motion_fault_after = 0.0  # ignore motion's FAULT telemetry until then (just RESET)
         self.lock = threading.Lock()
         self.fake_pico = None
         ports = {"gripper": self.grip_cfg["telemetry_port"],
@@ -329,6 +332,12 @@ class Supervisor:
         if gs.get("state") == "STALE":
             self.raise_fault("Pico link stale (servo frozen by the Pico)")
 
+        # 3b. motion faulted by itself (blocked, stalled, timed out, slip): it is
+        #     already holding; latch it here too so the LED shows it and RESET is needed.
+        ms = m.last_msg or {}
+        if ms.get("state") == "FAULT" and now >= self.motion_fault_after:
+            self.raise_fault(f"motion: {ms.get('fault') or 'fault'}")
+
         # 4. vision down or a hand in view: pause; resume once both are clear.
         vc = v.cfg
         # "Back" only once the new vision has really sent a heartbeat.
@@ -396,6 +405,8 @@ class Supervisor:
         self.power_up()
         if restarted:
             time.sleep(1.5)
+        # motion's last telemetry may still say FAULT until it has seen RESET
+        self.motion_fault_after = time.monotonic() + 1.0
         self.fault = None
         self._held_directly = False
         if "motion" in restarted:        # a fresh motion has no fault

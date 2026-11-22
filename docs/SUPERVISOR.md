@@ -29,6 +29,7 @@ The dashboard is at `http://<pi-ip>:8090`. It has STOP, Reset, Home and Open gri
 1. If the e-stop is pressed, or its wire is broken, that's a FAULT. The hardware has already cut motor power; the software just refuses to move until RESET.
 2. If `gripper_link` or `motion` dies or goes silent, that's a FAULT: stop and hold. If motion is the one that died, the supervisor sends STOP to the drivers itself.
 3. If the Pico link goes stale, that's a FAULT. The Pico has already frozen the servo on its own.
+   If motion faults by itself (a joint pushing against something, a stall, a timeout, the object slipping), the supervisor latches that FAULT too. Motion is already holding; the fault LED (GPIO27, pin 13) comes on and Reset is needed.
 4. If vision dies or goes silent, motion is PAUSED (holding), vision is restarted, and motion RESUMES once vision's heartbeat is back. A vision crash is never a fault.
 5. A FAULT is sticky: only Reset clears it. Reset restarts any dead process, and after an e-stop it re-homes the arm.
 
