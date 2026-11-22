@@ -22,8 +22,10 @@
 #   GPIO27 (pin 13) out: fault LED MOSFET
 #   GPIO17 (pin 11) in:  e-stop NC contact to GND: 0 = OK, 1 = pressed or wire broken
 #   GPIO23 (pin 16) in:  START button to GND: 0 = pressed
-gpio-bcm2711 set 18,27 pd
-gpio-bcm2711 set 18,27 op dl
+#   GPIO19 (pin 35) out: gripper servo signal, low (no pulses = servo idle)
+#                        until gripper_link starts its PWM
+gpio-bcm2711 set 18,19,27 pd
+gpio-bcm2711 set 18,19,27 op dl
 gpio-bcm2711 set 17,23 ip pu
 echo "safety I/O ready: power+LED off, e-stop reads $(cat /dev/gpio/17 2>/dev/null), START reads $(cat /dev/gpio/23 2>/dev/null)"
 

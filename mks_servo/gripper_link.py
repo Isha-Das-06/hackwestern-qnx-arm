@@ -2,17 +2,18 @@
 gripper_link: the QNX side of the gripper. QNX makes every grip decision here.
 
 Run at high priority so the force loop keeps its timing under load:
-    on -p 30 python3 gripper_link.py            (real Pico on /dev/ser4)
-    python3 gripper_link.py --port /dev/ttyp3   (fake_pico.py for testing)
+    on -p 30 python3 gripper_link.py            (real Pico on /dev/ser4, servo on GPIO19)
+    python3 gripper_link.py --port /dev/ttyp3   (fake_pico.py, fake servo: for testing)
 
 What it does, every 10 ms (100 Hz, absolute deadlines so it never drifts):
   1. read the newest FSR frame from the Pico (UART4),
   2. compare force with the active object's target / max (grip_profiles.json),
   3. step the servo angle: close slowly until target, hold, back off at once
      if either jaw goes above max,
-  4. send the new angle to the Pico.
+  4. set the servo's pulse width (Pi hardware PWM, GPIO19 / pin 35), clamped
+     to angle_min..angle_max.
 If no valid Pico frame arrives for 50 ms the link is STALE: we hold the angle.
-If QNX goes silent, the Pico freezes the servo by itself after 100 ms.
+If this process dies, QNX's GPIO driver stops the PWM and the servo goes limp.
 
 Commands: one JSON object per UDP packet to 127.0.0.1:<cmd_port>, reply is
 the status JSON.  {"cmd": "OPEN" | "GRIP" | "HOLD" | "RELAX" | "STATUS",
@@ -100,13 +101,42 @@ class PicoLink:
             self.frames_ok += 1
 
     def send(self, angle, hold):
+        """Angle frame to the board. fake_pico.py uses it for its fake physics;
+        the real Pico ignores it (Pi TX -> Pico RX needn't be wired)."""
         a = max(0, min(180, int(round(angle))))
         fr = bytes([0xAA, 0x56, a, 0x01 if hold else 0x00, self.tx_seq])
         self.tx_seq = (self.tx_seq + 1) & 0xFF
         try:
             os.write(self.fd, fr + bytes([xor(fr)]))
         except OSError:
-            pass   # TX trouble shows up as the Pico freezing; nothing smarter to do
+            pass
+
+
+class ServoPWM:
+    """The gripper servo on a Pi hardware PWM pin (GPIO19 = PWM0_1, pin 35), 50 Hz.
+    The PWM starts on the first write, so the servo stays limp until then."""
+
+    def __init__(self, cfg, fake=False):
+        self.cfg, self.fake = cfg, fake
+        self.pwm = None
+        self.angle = None            # last angle written (after the clamp)
+
+    def write(self, angle):
+        c = self.cfg
+        a = round(max(c["angle_min"], min(c["angle_max"], angle)), 1)
+        if a == self.angle:
+            return
+        us = c["pulse_min_us"] + a / 180.0 * (c["pulse_max_us"] - c["pulse_min_us"])
+        duty = us * c["servo_hz"] / 1e4              # percent of the period
+        if not self.fake:
+            if self.pwm is None:
+                import rpi_gpio as G
+                G.setmode(G.BCM)
+                self.pwm = G.PWM(c["servo_pin"], c["servo_hz"], mode=G.PWM.MODE_MS)
+                self.pwm.start(duty)
+            else:
+                self.pwm.ChangeDutyCycle(duty)
+        self.angle = a
 
 
 class Gripper:
@@ -151,7 +181,8 @@ class Gripper:
             self.angle = self._toward_open(self.angle, self.cfg["relax_deg"])
             self.state, self.profile = "HOLD", None
         elif cmd == "ANGLE":
-            self.target = max(0.0, min(180.0, float(msg.get("angle", self.angle))))
+            self.target = max(self.cfg["angle_min"],
+                              min(self.cfg["angle_max"], float(msg.get("angle", self.angle))))
             self.state, self.profile, self.obj = "MOVING", None, None
         else:
             return f"unknown cmd {cmd!r}"
@@ -174,12 +205,13 @@ class Gripper:
         if not fresh:
             self.state = "STALE"     # keep sending the same angle: hold
             return
-        fsr1, fsr2, pico_angle, _, _ = link.latest
+        fsr1, fsr2 = link.latest[:2]
         if self.state in ("WAITING", "STALE"):
-            # (Re)connected. Start from where the Pico says the servo is; if it
-            # was never attached, the servo jumps to attach_angle (its centre,
-            # where the jaws sit mid-travel), so that must be a safe spot.
-            self.angle = float(pico_angle if not (link.latest[3] & 0x02) else cfg["attach_angle"])
+            # (Re)connected. The first time, the servo jumps to attach_angle when
+            # its PWM starts (its centre, jaws mid-travel), so that must be a safe
+            # spot; after a link drop it stays where it was.
+            if self.angle is None:
+                self.angle = float(cfg["attach_angle"])
             self.state = "HOLD"
         force, peak = (fsr1 + fsr2) / 2.0, max(fsr1, fsr2)
 
@@ -279,7 +311,7 @@ class LoopTimer:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
-    ap.add_argument("--port", help="override config port (e.g. fake_pico pty)")
+    ap.add_argument("--port", help="override config port (fake_pico pty): also fakes the servo")
     ap.add_argument("--quiet", action="store_true", help="no 1 s status lines")
     args = ap.parse_args()
 
@@ -287,6 +319,7 @@ def main():
     profiles = load_json("grip_profiles.json")
     port = args.port or cfg["port"]
     link = PicoLink(open_raw_port(port))
+    servo = ServoPWM(cfg, fake=bool(args.port))
     grip = Gripper(cfg, profiles)
 
     cmd_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -298,7 +331,8 @@ def main():
     timer = LoopTimer(cfg["loop_hz"])
     tel_every = max(1, int(cfg["loop_hz"] / cfg["telemetry_hz"]))
     cycle = 0
-    print(f"gripper_link: port={port} {cfg['loop_hz']} Hz, cmd udp {cfg['cmd_port']}, "
+    print(f"gripper_link: port={port} servo={'FAKE' if servo.fake else 'GPIO%d' % cfg['servo_pin']} "
+          f"{cfg['loop_hz']} Hz, cmd udp {cfg['cmd_port']}, "
           f"telemetry udp {cfg['telemetry_port']}, pid {os.getpid()}", flush=True)
 
     def status():
@@ -307,8 +341,8 @@ def main():
         return {
             "t": time.time(), "state": grip.state, "object": grip.obj,
             "angle": None if grip.angle is None else round(grip.angle, 1),
-            "fsr1": f and f[0], "fsr2": f and f[1], "pico_angle": f and f[2],
-            "pico_frozen": bool(f and f[3] & 1), "slip": grip.slip,
+            "fsr1": f and f[0], "fsr2": f and f[1], "servo_angle": servo.angle,
+            "slip": grip.slip,
             "over_max": grip.over_max, "profile": grip.profile,
             "link_age_ms": None if link.last_rx is None else round((now - link.last_rx) * 1000, 1),
             "frames_ok": link.frames_ok, "frames_bad": link.frames_bad, "seq_gaps": link.seq_gaps,
@@ -336,6 +370,7 @@ def main():
 
         grip.step(link, now)
         if grip.angle is not None:
+            servo.write(grip.angle)
             link.send(grip.angle, grip.hold_flag())
 
         cycle += 1
