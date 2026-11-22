@@ -199,7 +199,15 @@ class Servo42C:
         """
         val = (speed & 0x7F) | ((direction & 0x01) << 7)
         payload = bytes([val]) + int(pulses).to_bytes(4, "big")
-        self._command(0xFD, payload, retries)
+        status = self.transact(0xFD, payload, 1, retries)[0]
+        if status == 0x02:
+            # The previous move's late "complete" frame was read as this reply:
+            # count it, then wait for this move's own "started" reply.
+            self.moves_completed += 1
+            frame = self._read_frame(3 if self.has_checksum else 2)
+            status = frame[1] if frame is not None else 0x01
+        if status != 0x01:
+            raise ServoError(f"{self.name}: 0xFD returned status {status}")
 
     def is_stalled(self):
         return self.transact(0x3E)[0] == 0x01

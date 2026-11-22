@@ -38,6 +38,7 @@ MOTORS = {
 
 RUN_SPEED = 15                 # 0-127, ~30 mm/s on the 12.7 mm wheel
 MIN_SPEED = 5                  # below this the shaft often doesn't turn
+DEG_PER_S_PER_SPEED = 3.8      # V1.1 at microsteps 236 (measured: speed 8 = 30 deg/s)
 DIR_FORWARD = 1                # 0 = CW, 1 = CCW
 MM_PER_REV = 12.7 * math.pi
 BIG_PULSE_COUNT = 4_720_000    # continuous run, re-sent every REISSUE_S
@@ -47,6 +48,8 @@ POLLED_MOVE_S = 0.02           # encoder poll for V1.0 fixed moves
 SEEK_SPEED = 8                 # not MIN_SPEED: a shaft that fails to start reads as blocked
 SEEK_ERROR_DEG = 10.0          # shaft this far behind = blocked; motor 1 lags up to ~5.3 deg turning freely at speed 8
 SEEK_CONFIRM_POLLS = 3         # readings in a row, so a start-up jolt doesn't count
+SEEK_STUCK_S = 0.15            # ...and the shaft turned less than SEEK_STUCK_DEG in this long
+SEEK_STUCK_DEG = 0.6           # (at seek speed it turns ~4.5 deg in 0.15 s, even when tight)
 SEEK_BACKOFF_DEG = 2.0
 
 
@@ -207,7 +210,7 @@ def start_turning(m, direction, speed, limit_deg):
 
 def run_until_blocked(m, direction, speed=SEEK_SPEED, error_deg=SEEK_ERROR_DEG,
                       max_deg=360.0, backoff_deg=SEEK_BACKOFF_DEG, timeout=30.0,
-                      protection_after=True):
+                      protection_after=True, stuck_s=SEEK_STUCK_S):
     """Turn until something stops the shaft, then back off `backoff_deg`.
 
     Returns the degrees turned before contact, and leaves the motor enabled
@@ -223,6 +226,7 @@ def run_until_blocked(m, direction, speed=SEEK_SPEED, error_deg=SEEK_ERROR_DEG,
     shaft; re-arming it after a trip was followed by a ~60 deg jump.
     `protection_after` is what it is set to afterwards.
     """
+    tracker = p0 = None
     try:
         if m.is_stalled():
             m.clear_stall()
@@ -230,15 +234,25 @@ def run_until_blocked(m, direction, speed=SEEK_SPEED, error_deg=SEEK_ERROR_DEG,
             m.set_protection(False)
         m.enable(True)
         tracker = AngleTracker(m)
+        p0 = m.pulses_received()
         # Driver-side limit, past max_deg so the software check below trips first.
         start_turning(m, direction, speed, max_deg * 1.2)
         over, peak = 0, 0.0
         deadline = time.monotonic() + timeout
+        hist = [(time.monotonic(), 0.0)]
         while True:
             time.sleep(POLLED_MOVE_S)
             turned = tracker.update()
             err = m.shaft_error_degrees()
-            if abs(err) >= error_deg:
+            # Contact = lagging AND the shaft has (nearly) stopped for stuck_s. A
+            # tight spot can push the lag to its 18 deg ceiling and even stick for
+            # a moment, but over stuck_s the shaft keeps moving.
+            now = time.monotonic()
+            hist.append((now, turned))
+            while len(hist) > 2 and now - hist[1][0] >= stuck_s:
+                hist.pop(0)
+            stuck = now - hist[0][0] >= stuck_s * 0.8 and turned - hist[0][1] < SEEK_STUCK_DEG
+            if abs(err) >= error_deg and stuck:
                 over += 1
                 if over >= SEEK_CONFIRM_POLLS:
                     break
@@ -255,10 +269,13 @@ def run_until_blocked(m, direction, speed=SEEK_SPEED, error_deg=SEEK_ERROR_DEG,
         toward = 1.0 if err >= 0 else -1.0
 
         if backoff_deg > 0:
-            # The target is ahead of the blocked shaft, so it has to come back
-            # through that gap before the shaft moves; hence the generous limit.
-            start_turning(m, direction ^ 1, speed, backoff_deg + 45.0)
-            deadline = time.monotonic() + 5.0
+            # The target is ahead of the blocked shaft (by more than the lag
+            # reading's 18 deg ceiling after a long push): it has to come back
+            # through that gap, measured from the pulse counter, before the shaft moves.
+            aimed = abs(m.pulses_received() - p0) * 360.0 / Servo42C.PULSES_PER_REV
+            gap = max(0.0, aimed - abs(contact))
+            start_turning(m, direction ^ 1, speed, gap + backoff_deg + 45.0)
+            deadline = time.monotonic() + 3.0 + (gap + backoff_deg) / max(speed * DEG_PER_S_PER_SPEED, 20.0)
             while (contact - tracker.total) * toward < backoff_deg:
                 if time.monotonic() > deadline:
                     raise ServoError(f"{m.name}: couldn't back off the obstacle")
@@ -268,10 +285,39 @@ def run_until_blocked(m, direction, speed=SEEK_SPEED, error_deg=SEEK_ERROR_DEG,
         return abs(contact)
     except BaseException:
         m.safe_stop()
+        if tracker is not None and p0 is not None:
+            stop_pushing(m, direction, speed, tracker, p0)
         raise
     finally:
         if m.has_checksum:
             m.set_protection(protection_after)
+
+
+def stop_pushing(m, direction, speed, tracker, p0):
+    """After a failed seek the driver can be aiming far past a stop (the lag
+    reading saturates at 18 deg, so it can't show how far). Compare the pulse
+    counter (where the driver aims) with the encoder (where the shaft is) and
+    pull the aim back to the shaft, so the motor doesn't keep straining and
+    doesn't lunge back if it slips. Best effort."""
+    try:
+        aimed = abs(m.pulses_received() - p0) * 360.0 / Servo42C.PULSES_PER_REV
+        gap = aimed - abs(tracker.update())
+        if gap < 2.0:
+            return
+        back = direction ^ 1
+        if m.has_checksum:
+            m.move(back, speed, deg_to_pulses(gap))
+            time.sleep(gap / (speed * DEG_PER_S_PER_SPEED) + 0.3)
+        else:
+            p_end = m.pulses_received()
+            target = deg_to_pulses(gap)
+            m.run(back, speed)
+            deadline = time.monotonic() + gap / 30.0 + 1.0
+            while abs(m.pulses_received() - p_end) < target and time.monotonic() < deadline:
+                time.sleep(0.01)
+        m.stop()
+    except (ServoError, OSError):
+        pass
 
 
 def cmd_seek(args):

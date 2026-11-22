@@ -46,7 +46,7 @@ import time
 
 from gripper_link import HERE, LoopTimer, load_json
 from mks_servo import Servo42C, ServoError
-from servo_test import SEEK_BACKOFF_DEG, AngleTracker, run_until_blocked
+from servo_test import SEEK_BACKOFF_DEG, SEEK_STUCK_S, AngleTracker, run_until_blocked
 
 TAUGHT = os.path.join(HERE, "config", "taught.json")
 
@@ -116,6 +116,7 @@ class Motion:
         self.picks_done = 0
         self.last_result = None
         self.joints_now = {}
+        self.lags = {}                     # motor lag (0x39) during the last move, motor deg
         self.jobs = queue.Queue()
         self.abort = threading.Event()     # FAULT / STOP: stop now, hold
         self.paused = threading.Event()    # PAUSE: stop and hold, then carry on
@@ -208,6 +209,15 @@ class Motion:
     def hold_all(self):
         for j in self.joints.values():
             j.m.safe_stop()          # stop, stay enabled (holding torque)
+            if not j.m.has_checksum:
+                # V1.0 keeps running until a stop gets through: keep sending it.
+                deadline = time.monotonic() + 1.0
+                while time.monotonic() < deadline:
+                    try:
+                        j.m.stop()
+                        break
+                    except (ServoError, OSError):
+                        time.sleep(0.02)
 
     def checkpoint(self):
         """Called often by every loop: obey FAULT/STOP and PAUSE."""
@@ -247,10 +257,17 @@ class Motion:
     def move_to(self, targets, step, approach=True):
         """Coordinated absolute move of one or both joints, in joint units."""
         self.step = step
+        c = self.cfg
         if self.homed:
             for name, t in targets.items():
                 self.joints[name].check_limits(t)
-        c = self.cfg
+            # Low down, the jaws are among the dock platforms: the base may only
+            # turn while the lift is (and stays) at travel height.
+            base, lift = self.joints["base"], self.joints["lift"]
+            if "base" in targets and abs(targets["base"] - base.deg()) > base.cfg.get("tolerance", c["tolerance"]):
+                low = c["travel_lift"] - c["tolerance"]
+                if lift.deg() < low or targets.get("lift", c["travel_lift"]) < low:
+                    raise Rejected("the base only turns with the lift at travel height")
         tol = {n: self.joints[n].cfg.get("tolerance", c["tolerance"]) for n in targets}
         if approach and self.homed:
             # Gear play: a joint with "approach" always finishes its move turning
@@ -307,9 +324,11 @@ class Motion:
             else:                     # V1.0: run, we stop it on its pulse counter
                 done0 = None
                 j.m.run(j.direction(d), speed)
+            rate = j.cfg["deg_per_s"] if "deg_per_s" in j.cfg else speed * k   # motor deg/s
             active[name] = {"d": d, "start": start, "done0": done0, "last": start,
-                            "p0": p0, "pulses": pulses,
-                            "speed": speed, "over": 0, "prev": (time.monotonic(), 0), "v": 0.0}
+                            "p0": p0, "pulses": pulses, "rate": rate,
+                            "hist": [(time.monotonic(), start)], "over_since": None,
+                            "speed": speed, "prev": (time.monotonic(), 0), "v": 0.0}
         deadline = time.monotonic() + t_move * c["timeout_factor"] + c["timeout_margin_s"]
         next_progress = time.monotonic() + c["progress_check_s"]
         next_stall = next_slip = time.monotonic() + 0.5
@@ -320,14 +339,35 @@ class Motion:
                 if self.paused.is_set():
                     self.wait_if_paused()
                     return False
-                # Obstruction: the shaft falls behind the commanded angle (0x39).
-                # Turning freely it lags 2-5 motor deg; blocked, it passes 10 in ~0.2 s.
+                # Obstruction = working hard AND not moving, for long enough: the
+                # shaft falls behind the commanded angle (0x39) and has nearly
+                # stopped, for block_s. Turning freely it lags 2-8 motor deg. Climbing
+                # through a joint's known tight band (the lift's printed guide, 36-52
+                # mm) it can stick and break free, so there it gets tight_band_block_s;
+                # going down (where it could press on something) it keeps block_s.
+                now = time.monotonic()
                 for name, a in active.items():
                     j = self.joints[name]
                     lag = j.m.shaft_error_degrees()
+                    pos = j.motor_deg()
                     a["lag"] = abs(lag)
-                    a["over"] = a["over"] + 1 if abs(lag) >= j.cfg["lag_limit_motor_deg"] else 0
-                    if a["over"] >= c["lag_polls"]:
+                    self.lags[name] = round(lag, 2)
+                    hist = a["hist"]
+                    hist.append((now, pos))
+                    while len(hist) > 2 and now - hist[1][0] >= c["stuck_window_s"]:
+                        hist.pop(0)
+                    t_old, p_old = hist[0]
+                    stuck = (now - t_old >= c["stuck_window_s"] * 0.8
+                             and abs(pos - p_old) < c["stuck_fraction"] * a["rate"] * (now - t_old))
+                    if not (abs(lag) >= j.cfg["lag_limit_motor_deg"] and stuck):
+                        a["over_since"] = None
+                    elif a["over_since"] is None:
+                        a["over_since"] = now
+                    band = j.cfg.get("tight_band")
+                    climbing = a["d"] > 0                      # band only sticks going up
+                    in_band = band and climbing and band[0] <= (pos - j.zero) / j.ratio <= band[1]
+                    hold_s = j.cfg["tight_band_block_s"] if in_band else c["block_s"]
+                    if a["over_since"] is not None and now - a["over_since"] >= hold_s:
                         for other in active:
                             self.joints[other].m.stop()
                         self.relieve(j, j.direction(a["d"]) ^ 1, lag)
@@ -405,7 +445,8 @@ class Motion:
         bit = j.cfg["dir_bit_positive"] if toward > 0 else j.cfg["dir_bit_positive"] ^ 1
         turned = run_until_blocked(j.m, bit, self.cfg["homing"]["seek_speed"],
                                    hj["seek_error_deg"], hj["seek_max_motor_deg"],
-                                   protection_after=j.cfg.get("stall_protection", True))
+                                   protection_after=j.cfg.get("stall_protection", True),
+                                   stuck_s=hj.get("seek_stuck_s", SEEK_STUCK_S))
         j.reset_tracker()
         return turned
 
@@ -499,12 +540,12 @@ class Motion:
         """Go to a pocket (or "home") the way a pick does: travel height, turn,
         lower (unless high: stay at travel height above it)."""
         self.state = "GOTO"
-        if where == "home":
-            self.move_to(self.cfg["home_pose"], "home")
-            return
         P, lift = self.cfg["pockets"], self.cfg["travel_lift"]
         if self.joints["lift"].deg() < lift - self.cfg["tolerance"]:
             self.move_to({"lift": lift}, "up to travel height")
+        if where == "home":
+            self.move_to(self.cfg["home_pose"], "home")
+            return
         self.move_to({"lift": lift, "base": P[where]["base"]}, f"to pocket {where}")
         if not high:
             self.move_to({"lift": P[where]["lift"]}, f"down into pocket {where}")
@@ -661,7 +702,7 @@ class Motion:
         return {"t": time.time(), "state": self.state, "step": self.step,
                 "busy": self.busy() or self.job is not None, "homed": self.homed,
                 "fault": self.fault, "paused": self.paused.is_set(),
-                "joints": self.joints_now, "job": self.job and list(self.job),
+                "joints": self.joints_now, "lag": self.lags, "job": self.job and list(self.job),
                 "limits": {n: [round(j.lo, 1), round(j.hi, 1)] for n, j in self.joints.items()},
                 "picks_done": self.picks_done, "last_result": self.last_result,
                 "sim": self.sim, "timing": timer.stats()}

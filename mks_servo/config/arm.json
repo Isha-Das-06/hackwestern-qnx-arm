@@ -4,28 +4,28 @@
   "_joints": "lift: rack and pinion, 20T m1.2 pinion = 75.40 mm per motor turn (360/75.40 = 4.7746). It backdrives when the motor lets go, so its stall protection stays OFF (a trip releases the shaft). base: motor drives the turntable 1:1 through the B06 adapter; the 0.3 mm tab play is taken up by always finishing a move turning the 'approach' way. dir_bit_positive: CHECK on the arm (jog lift +5 must go UP, jog base +5 must turn counterclockwise from above).",
   "joints": {
     "lift": {"port": "/dev/ser3", "addr": 224, "firmware": "1.1", "unit": "mm",
-             "gear_ratio": 4.7746, "dir_bit_positive": 1, "stall_protection": false,
-             "max_speed": 20, "min": 0.0, "max": 68.0, "limit_margin": 0.5,
-             "lag_limit_motor_deg": 10.0},
+             "gear_ratio": 4.7746, "dir_bit_positive": 1, "stall_protection": false, "tolerance": 1.5,
+             "max_speed": 12, "min": -3.0, "max": 68.0, "limit_margin": 0.5,
+             "lag_limit_motor_deg": 10.0, "tight_band": [36.0, 52.0], "tight_band_block_s": 2.0},
     "base": {"port": "/dev/ser5", "addr": 224, "firmware": "1.0", "unit": "deg",
              "gear_ratio": 1.0, "dir_bit_positive": 1, "deg_per_s": 38.0, "tolerance": 1.5,
              "max_speed": 10, "min": -85.0, "max": 67.0, "limit_margin": 3.0,
              "lag_limit_motor_deg": 10.0, "approach": 1, "approach_overshoot": 3.0}
   },
 
-  "_homing": "hard_stop = drive slowly into the stop until the motor lags (Surya's seek), then that spot is stop_at. marked_zero = the arm is parked at marked_at when motion starts. The lift has no clear spot to go all the way down (the jaws always meet a platform), so it seeks UP to its solid top stop, nominally 70 mm (CAD stroke). The base seeks its clockwise stop, which sits at -88.3 deg in the CAD frame (dock A centred at -51.0 when the stop was called -79.3); measured stop-to-stop range 158.6 deg. calibrate_both_ends re-measures the base range (CALIBRATE).",
+  "_homing": "hard_stop = drive slowly into the stop until the motor lags (Surya's seek), then that spot is stop_at. marked_zero = the arm is parked at marked_at when motion starts. The lift has no clear spot to go all the way down (the jaws always meet a platform), so it seeks UP to its solid top stop, nominally 70 mm (CAD stroke). The 3D-printed lift guide is tight 40-48 mm above pick height: the climbing lag reaches its 18 deg ceiling there, but the shaft keeps moving. It can also stick there for a moment and break free. So 'blocked' (both the seek and the obstruction check) means lag over the limit AND the shaft nearly stopped (under stuck_fraction of its commanded speed over stuck_window_s), for block_s; inside the lift's tight_band, for tight_band_block_s (the seek uses seek_stuck_s). Both drivers' lag reading (0x39) saturates at 18.0 deg, so every limit must stay below that. The base seeks its clockwise stop, which sits at -88.3 deg in the CAD frame (dock A centred at -51.0 when the stop was called -79.3); measured stop-to-stop range 158.6 deg. calibrate_both_ends re-measures the base range (CALIBRATE).",
   "homing": {
     "seek_speed": 8,
     "lift": {"mode": "hard_stop", "toward": 1, "stop_at": 70.0,
-             "seek_error_deg": 10.0, "seek_max_motor_deg": 450.0},
+             "seek_error_deg": 10.0, "seek_stuck_s": 2.0, "seek_max_motor_deg": 380.0},
     "base": {"mode": "hard_stop", "marked_at": 0.0, "toward": -1, "stop_at": -88.3,
              "seek_error_deg": 10.0, "seek_max_motor_deg": 220.0, "calibrate_both_ends": true}
   },
   "auto_home": false,
   "unhomed_jog_max": 5.0,
 
-  "_poses": "Pockets default to the CAD docks (145 mm radius): A -60, B -20, OUT +20, C +60 deg; lift heights are placeholders until taught. Vision box N = pocket N; TEACH overrides these in taught.json. travel_lift must clear the dock platforms while the base turns.",
-  "home_pose": {"lift": 50.0, "base": 0.0},
+  "_poses": "Pockets default to the CAD docks (145 mm radius): A -60, B -20, OUT +20, C +60 deg; lift heights are placeholders until taught. Vision box N = pocket N; TEACH overrides these in taught.json. travel_lift must clear the dock platforms while the base turns (motion refuses to turn the base below it). home_pose parks the arm at the model's built-in home, the clockwise end (CAD park index -82 deg), out of the camera's view of the docks.",
+  "home_pose": {"lift": 50.0, "base": -82.0},
   "travel_lift": 50.0,
   "pockets": {
     "1": {"lift": 10.0, "base": -60.0},
@@ -37,7 +37,9 @@
   "tolerance": 1.0,
   "min_speed": 5,
   "deg_per_s_per_speed": 3.8,
-  "lag_polls": 3,
+  "block_s": 0.08,
+  "stuck_window_s": 0.15,
+  "stuck_fraction": 0.3,
   "timeout_factor": 3.0,
   "timeout_margin_s": 2.0,
   "progress_check_s": 0.7,
