@@ -13,13 +13,14 @@ yaw. gear_ratio in config/arm.json converts them to motor degrees.
 
 Safety rules, each one sentence:
   - Pocket positions are fixed, taught joint positions; no IK.
-  - Homing seeks the lift's bottom stop at power-up (and the base's, if set).
+  - Homing seeks the lift's top stop, then the base's clockwise stop.
   - Every target is checked against the joint's soft limits before moving, and
     motion refuses to run if any pocket or pose is outside them.
   - Targets are absolute, so errors never add up from move to move.
   - Both joints move together: speeds are scaled so they arrive together.
   - If a motor falls too far behind its commanded angle, something is in the
-    way: stop, stop pushing on it, hold, FAULT.
+    way: stop, stop pushing on it, hold, FAULT. Climbing through the lift's
+    known tight band, it backs down and retries (twice) before it faults.
   - Every move has a time limit, and if a joint stops making progress we stop
     (motor 2's V1.0 firmware has no stall detection of its own).
   - Any fault = stop and HOLD (motors stay enabled, gripper keeps its grip).
@@ -65,6 +66,14 @@ class Fault(Exception):
 
 class Rejected(Exception):
     """A command we refuse without moving (bad pocket, out of limits...)."""
+
+
+class Stuck(Fault):
+    """A joint stuck while climbing through its known tight band: back down and retry."""
+
+    def __init__(self, joint, gap, msg):
+        super().__init__(msg)
+        self.joint, self.gap = joint, gap     # gap = motor deg the aim is ahead of the shaft
 
 
 class Joint:
@@ -133,10 +142,10 @@ class Motion:
         for name, jc in self.cfg["joints"].items():
             if self.sim:
                 from sim_servo import FakeServo
-                # Fake hard stops: the lift between motor 0 and 334 deg (70 mm,
-                # starting low), the base at +-80 deg either side of where it starts.
+                # Fake hard stops: the lift between motor -15 and 334 deg (-3 to
+                # 70 mm, starting low), the base at +-80 deg either side of where it starts.
                 m = FakeServo(jc["port"], name=name, firmware=jc["firmware"],
-                              hard_min=0.0 if name == "lift" else -80.0,
+                              hard_min=-15.0 if name == "lift" else -80.0,
                               hard_max=334.0 if name == "lift" else 80.0,
                               start_deg=60.0 if name == "lift" else 0.0,
                               speedup=self.sim)
@@ -253,6 +262,27 @@ class Motion:
         except (ServoError, OSError):
             pass
 
+    def back_down(self, j, gap):
+        """Stuck climbing through the tight band: pull the aim back to the shaft
+        (gap) and drop tight_band_backoff below it, so the next climb gets a run-up.
+        V1.1 only (the lift): an exact pulse move, the driver stops itself."""
+        self.step = f"{j.name} stuck in its tight band: backing down to retry"
+        print(f"motion: {self.step} (aim {gap:.1f} motor deg ahead)", flush=True)
+        deg = gap + self.cfg["tight_band_backoff"] * j.ratio
+        speed = j.cfg["max_speed"]
+        p0 = j.m.pulses_received()
+        pulses = int(deg / 360.0 * j.m.PULSES_PER_REV)
+        try:
+            j.m.move(j.direction(-1), speed, pulses)
+            deadline = time.monotonic() + deg / (speed * self.cfg["deg_per_s_per_speed"]) + 1.0
+            while abs(j.m.pulses_received() - p0) < pulses - 2 and time.monotonic() < deadline:
+                self.checkpoint()
+                time.sleep(0.03)
+            time.sleep(0.2)
+        except BaseException:
+            self.hold_all()
+            raise
+
     # ------------------------------------------------------------- moving
     def move_to(self, targets, step, approach=True):
         """Coordinated absolute move of one or both joints, in joint units."""
@@ -280,7 +310,7 @@ class Motion:
                     if j.lo <= pre <= j.hi:
                         self.move_to(dict(targets, **{name: pre}), step, approach=False)
                         self.step = step
-        tries = 0                           # 1 move + up to 2 small corrections
+        tries = retries = 0                 # 1 move + up to 2 small corrections
         while tries < 3:
             self.checkpoint()
             self.wait_if_paused()
@@ -292,8 +322,15 @@ class Motion:
                     todo[name] = d
             if not todo:
                 return
-            if self._run_move(todo):        # False = paused part-way: re-plan, same try
-                tries += 1
+            try:
+                if self._run_move(todo):    # False = paused part-way: re-plan, same try
+                    tries += 1
+            except Stuck as e:
+                retries += 1
+                if retries > c["tight_band_retries"]:
+                    raise Fault(f"{e} (still stuck after {retries - 1} retries)")
+                self.back_down(self.joints[e.joint], e.gap)
+                self.step = step
         for name, t in targets.items():
             j = self.joints[name]
             err = abs(j.deg() - t)
@@ -319,8 +356,10 @@ class Motion:
             pulses = int(abs(d) / 360.0 * j.m.PULSES_PER_REV)
             p0 = j.m.pulses_received()
             if j.m.has_checksum:      # V1.1: exact pulse move, the driver stops itself
-                done0 = j.m.moves_completed
+                # Count "move finished" frames only from here on: move() also counts
+                # a late one left over from the previous move.
                 j.m.move(j.direction(d), speed, pulses)
+                done0 = j.m.moves_completed
             else:                     # V1.0: run, we stop it on its pulse counter
                 done0 = None
                 j.m.run(j.direction(d), speed)
@@ -329,7 +368,10 @@ class Motion:
                             "p0": p0, "pulses": pulses, "rate": rate,
                             "hist": [(time.monotonic(), start)], "over_since": None,
                             "speed": speed, "prev": (time.monotonic(), 0), "v": 0.0}
-        deadline = time.monotonic() + t_move * c["timeout_factor"] + c["timeout_margin_s"]
+        band_s = [self.joints[n].cfg["tight_band_block_s"] for n, d in todo.items()
+                  if d > 0 and self.joints[n].cfg.get("tight_band")]
+        deadline = time.monotonic() + t_move * c["timeout_factor"] + c["timeout_margin_s"] \
+            + max(band_s, default=0.0)
         next_progress = time.monotonic() + c["progress_check_s"]
         next_stall = next_slip = time.monotonic() + 0.5
         try:
@@ -350,6 +392,13 @@ class Motion:
                     j = self.joints[name]
                     lag = j.m.shaft_error_degrees()
                     pos = j.motor_deg()
+                    if j.m.has_checksum:
+                        # 0x39 can't show a big lag (it caps or folds back), so also
+                        # count how far the shaft trails the pulses sent so far.
+                        aimed = abs(j.m.pulses_received() - a["p0"]) * 360.0 / j.m.PULSES_PER_REV
+                        behind = aimed - (pos - a["start"]) * (1 if a["d"] > 0 else -1)
+                        if behind > abs(lag):
+                            lag = behind if a["d"] > 0 else -behind
                     a["lag"] = abs(lag)
                     self.lags[name] = round(lag, 2)
                     hist = a["hist"]
@@ -366,10 +415,16 @@ class Motion:
                     band = j.cfg.get("tight_band")
                     climbing = a["d"] > 0                      # band only sticks going up
                     in_band = band and climbing and band[0] <= (pos - j.zero) / j.ratio <= band[1]
+                    a["in_band"] = in_band
                     hold_s = j.cfg["tight_band_block_s"] if in_band else c["block_s"]
                     if a["over_since"] is not None and now - a["over_since"] >= hold_s:
                         for other in active:
                             self.joints[other].m.stop()
+                        if in_band:
+                            aimed = abs(j.m.pulses_received() - a["p0"]) * 360.0 / j.m.PULSES_PER_REV
+                            raise Stuck(name, max(0.0, aimed - (pos - a["start"])),
+                                        f"{name} stuck in its tight band at "
+                                        f"{(pos - j.zero) / j.ratio:.1f} {j.unit}")
                         self.relieve(j, j.direction(a["d"]) ^ 1, lag)
                         raise Fault(f"{name} blocked: {abs(lag):.1f} motor deg behind "
                                     f"(something in the way)")
@@ -395,14 +450,16 @@ class Motion:
                             del active[name]
                     # V1.1: done on its "move finished" frame, or when its pulse
                     # counter has reached the commanded count (the shaft itself sags
-                    # under load, so its position can't tell).
-                    elif j.m.moves_completed > a["done0"] or \
-                            abs(j.m.pulses_received() - a["p0"]) >= a["pulses"] - 2:
+                    # under load, so its position can't tell), once the shaft has
+                    # caught up (a stuck shaft stays here for the obstruction check).
+                    elif (j.m.moves_completed > a["done0"] or
+                          abs(j.m.pulses_received() - a["p0"]) >= a["pulses"] - 2) \
+                            and a["lag"] < j.cfg["lag_limit_motor_deg"]:
                         del active[name]
                 if now > next_progress:
                     for name, a in active.items():
                         pos = self.joints[name].motor_deg()
-                        if abs(pos - a["last"]) < c["min_progress_motor_deg"]:
+                        if abs(pos - a["last"]) < c["min_progress_motor_deg"] and not a.get("in_band"):
                             raise Fault(f"{name} is not moving (jammed or stalled)")
                         a["last"] = pos
                     next_progress = now + c["progress_check_s"]
