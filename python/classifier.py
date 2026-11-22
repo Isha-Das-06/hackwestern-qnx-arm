@@ -36,7 +36,9 @@ FILE_VERSION = 2   # v2 saves the example pictures, so examples survive feature 
 # Robustness to things around the holder (arm parts, wires, a hand at the edge)
 MAX_SHIFT = 4  # camera/tray may have moved this many pixels (at NORM_SIDE scale) since the photo
 FOCUS_R = 1.6  # only look within this many holder-radii of the holder centre
-BG_LEARN = 0.05  # empty box: unchanged pixels slowly follow lighting changes
+BG_LEARN = 0.03  # empty box: unchanged pixels slowly follow lighting changes
+BG_SAFE_TH = 14.0  # ...only pixels closer than this to the photo (half the "changed" level)
+BG_MAX_CHANGED = 0.02  # ...and only while under 2% of the box differs at all
 
 
 def _normalize_size(bgr):
@@ -78,8 +80,13 @@ class PocketClassifier:
             if cs:
                 c = max(cs, key=cv2.contourArea)
                 (x, y), r = cv2.minEnclosingCircle(c)
-                # a plausible ring: not tiny, not the whole box
-                if cv2.contourArea(c) > 0.03 * h * w and 0.12 * min(h, w) < r < 0.6 * max(h, w):
+                # a plausible holder ring: not tiny, not the whole box, near the middle
+                # of the box (not some dark thing in a corner), and hollow (lighter inside)
+                inner = np.zeros(dark.shape, np.uint8)
+                cv2.circle(inner, (round(x), round(y)), max(1, round(0.45 * r)), 255, cv2.FILLED)
+                hollow = (inner > 0).any() and float((dark[inner > 0] > 0).mean()) < 0.5
+                if (cv2.contourArea(c) > 0.03 * h * w and 0.12 * min(h, w) < r < 0.6 * max(h, w)
+                        and abs(x - w / 2) < 0.22 * w and abs(y - h / 2) < 0.22 * h and hollow):
                     found = (x, y, r)
         if found is None:
             found = (w / 2, h / 2, 0.35 * min(h, w))
@@ -123,7 +130,16 @@ class PocketClassifier:
         bg = self.bg[pocket]
         if bg.shape != crop.shape:
             return
-        keep = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))) > 0
+        dist = getattr(self, "_dist", None)
+        if dist is None or dist.shape != crop.shape[:2]:
+            return
+        # Only pixels that clearly match the photo follow the light. Anything that differs
+        # (even a little, anywhere in the box) is never blended in - otherwise an object
+        # put down slowly could fade into the "empty" photo and the box would stay "empty".
+        changed = (dist > BG_SAFE_TH).astype(np.uint8)
+        if changed.mean() > BG_MAX_CHANGED:
+            return  # something is (partly) there: don't learn at all
+        keep = cv2.dilate(changed, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))) > 0
         new = cv2.addWeighted(bg.astype(np.float32), 1 - BG_LEARN, crop.astype(np.float32), BG_LEARN, 0)
         new[keep] = bg[keep]
         self.bg[pocket] = new.round().astype(np.uint8)
@@ -195,7 +211,8 @@ class PocketClassifier:
         # --- which pixels changed vs the empty pocket ---
         if pocket in self.bg:
             # lightness counts less (inside _changed), so soft shadows aren't "objects"
-            mask = (self._changed(pocket, blur) > DIFF_TH).astype(np.uint8) * 255
+            self._dist = self._changed(pocket, blur)  # kept for _learn_background
+            mask = (self._dist > DIFF_TH).astype(np.uint8) * 255
         else:
             gray = cv2.cvtColor(blur, cv2.COLOR_BGR2GRAY)
             _, mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
